@@ -42,7 +42,10 @@ export async function POST(request: Request) {
   try {
     const resp = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${OPENAI_API_KEY}` },
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
+      },
       body: JSON.stringify({
         model: 'gpt-3.5-turbo',
         messages: [{ role: 'user', content: prompt }],
@@ -57,7 +60,13 @@ export async function POST(request: Request) {
   const id = crypto.randomUUID();
   const [outfit] = await db
     .insert(outfits)
-    .values({ id, userId, itemIds, description: aiResponse, createdAt: Date.now() })
+    .values({
+      id,
+      userId,
+      itemIds,
+      description: aiResponse,
+      createdAt: new Date(),
+    })
     .returning();
   return NextResponse.json(outfit);
 }
