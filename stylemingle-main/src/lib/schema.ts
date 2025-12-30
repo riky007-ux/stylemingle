@@ -22,6 +22,7 @@ export const outfits = sqliteTable('outfits', {
   id: text('id').primaryKey(),
   userId: text('user_id').notNull().references(() => users.id),
   itemIds: text('item_ids').notNull(),
+  description: text('description').notNull(),
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
 });
 
