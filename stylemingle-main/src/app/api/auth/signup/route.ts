@@ -1,9 +1,11 @@
 export const runtime = 'edge';
+
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { users } from '@/lib/schema';
 import { eq } from 'drizzle-orm';
 import bcrypt from 'bcryptjs';
+import { randomUUID } from 'crypto';
 
 export async function POST(req: Request) {
   try {
@@ -21,17 +23,19 @@ export async function POST(req: Request) {
     }
 
     const hashed = await bcrypt.hash(password, 10);
+
     await db.insert(users).values({
+      id: randomUUID(),
       email,
       passwordHash: hashed,
       name,
-      createdAt: new Date(),
       subscription: 'free',
+      createdAt: new Date(),
     });
 
     return NextResponse.json({ success: true }, { status: 201 });
-  } catch (error) {
-    console.error(error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  } catch (err) {
+    console.error(err);
+    return NextResponse.json({ error: 'Server error' }, { status: 500 });
   }
 }
