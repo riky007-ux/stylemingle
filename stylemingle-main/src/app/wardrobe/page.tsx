@@ -1,1 +1,122 @@
-// placeholder
+'use client';
+import { useEffect, useState } from 'react';
+
+interface WardrobeItem {
+  id: string;
+  imageUrl: string;
+  description: string;
+}
+
+export default function WardrobePage() {
+  const [items, setItems] = useState<WardrobeItem[]>([]);
+  const [imageUrl, setImageUrl] = useState('');
+  const [description, setDescription] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+
+  const fetchItems = async () => {
+    setLoading(true);
+    setError('');
+    const res = await fetch('/api/wardrobe', {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await res.json();
+    if (res.ok) {
+      setItems(data);
+    } else {
+      setError(data.error || 'Failed to fetch items');
+    }
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    if (token) {
+      fetchItems();
+    }
+  }, [token]);
+
+  const addItem = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const res = await fetch('/api/wardrobe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ imageUrl, description }),
+    });
+    const data = await res.json();
+    if (res.ok) {
+      setItems(prev => [...prev, data]);
+      setImageUrl('');
+      setDescription('');
+    } else {
+      setError(data.error || 'Failed to add item');
+    }
+  };
+
+  const deleteItem = async (id: string) => {
+    await fetch(`/api/wardrobe/${id}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    setItems(prev => prev.filter(item => item.id !== id));
+  };
+
+  if (!token) {
+    return <p className="p-4">Please log in to manage your wardrobe.</p>;
+  }
+
+  return (
+    <div className="container mx-auto py-8">
+      <h1 className="text-3xl font-semibold mb-6 text-center">My Wardrobe</h1>
+      {error && <p className="text-red-600 mb-4 text-center">{error}</p>}
+      <form onSubmit={addItem} className="max-w-md mx-auto bg-white p-6 shadow rounded space-y-3 mb-8">
+        <div>
+          <label className="block text-sm font-medium mb-1">Image URL</label>
+          <input
+            type="url"
+            value={imageUrl}
+            onChange={e => setImageUrl(e.target.value)}
+            className="w-full px-3 py-2 border rounded focus:outline-none focus:ring focus:border-indigo-400"
+            required
+          />
+        </div>
+        <div>
+          <label className="block text-sm font-medium mb-1">Description</label>
+          <input
+            type="text"
+            value={description}
+            onChange={e => setDescription(e.target.value)}
+            className="w-full px-3 py-2 border rounded focus:outline-none focus:ring focus:border-indigo-400"
+            required
+          />
+        </div>
+        <button type="submit" className="w-full py-2 rounded bg-green-600 text-white hover:bg-green-700 transition">
+          Add Item
+        </button>
+      </form>
+      {loading ? (
+        <p className="text-center">Loading wardrobe…</p>
+      ) : items.length === 0 ? (
+        <p className="text-center text-gray-600">Your wardrobe is empty. Start by adding a few pieces!</p>
+      ) : (
+        <ul className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
+          {items.map(item => (
+            <li key={item.id} className="bg-white shadow rounded overflow-hidden">
+              <img src={item.imageUrl} alt={item.description} className="w-full h-48 object-cover" />
+              <div className="p-4">
+                <p className="mb-2">{item.description}</p>
+                <button
+                  onClick={() => deleteItem(item.id)}
+                  className="text-red-600 hover:text-red-700 text-sm"
+                >
+                  Delete
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
