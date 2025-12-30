@@ -11,6 +11,13 @@ export default function WardrobePage() {
   const [items, setItems] = useState<WardrobeItem[]>([]);
   const [imageUrl, setImageUrl] = useState('');
   const [description, setDescription] = useState('');
+  const [category, setCategory] = useState('');
+  const [colors, setColors] = useState('');
+  const [pattern, setPattern] = useState('');
+  const [material, setMaterial] = useState('');
+  const [brand, setBrand] = useState('');
+  const [fitStyle, setFitStyle] = useState('');
+  const [tagging, setTagging] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -37,18 +44,59 @@ export default function WardrobePage() {
     }
   }, [token]);
 
+  const autoTag = async () => {
+    if (!imageUrl) return;
+    setTagging(true);
+    try {
+      const res = await fetch('/api/wardrobe/auto-tag', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageUrl }),
+      });
+      const data = await res.json();
+      // Only update fields if keys exist
+      if (data.category) setCategory(data.category);
+      if (data.colors) setColors(Array.isArray(data.colors) ? data.colors.join(', ') : data.colors);
+      if (data.pattern) setPattern(data.pattern);
+      if (data.material) setMaterial(data.material);
+      if (data.brand) setBrand(data.brand);
+      if (data.fitStyle) setFitStyle(data.fitStyle);
+    } catch {
+      // silently fail if tagging fails
+    }
+    setTagging(false);
+  };
+
   const addItem = async (e: React.FormEvent) => {
     e.preventDefault();
+    // Compose a description string from tags and the user-provided description
+    const tagParts: string[] = [];
+    if (category) tagParts.push(`Category: ${category}`);
+    if (colors) tagParts.push(`Colors: ${colors}`);
+    if (pattern) tagParts.push(`Pattern: ${pattern}`);
+    if (material) tagParts.push(`Material: ${material}`);
+    if (brand) tagParts.push(`Brand: ${brand}`);
+    if (fitStyle) tagParts.push(`Fit: ${fitStyle}`);
+    const finalDesc =
+      tagParts.join(' · ') + (description ? (tagParts.length ? ' · ' : '') + description : '');
+
     const res = await fetch('/api/wardrobe', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ imageUrl, description }),
+      body: JSON.stringify({ imageUrl, description: finalDesc }),
     });
     const data = await res.json();
     if (res.ok) {
       setItems(prev => [...prev, data]);
+      // Reset form fields
       setImageUrl('');
       setDescription('');
+      setCategory('');
+      setColors('');
+      setPattern('');
+      setMaterial('');
+      setBrand('');
+      setFitStyle('');
     } else {
       setError(data.error || 'Failed to add item');
     }
@@ -70,8 +118,8 @@ export default function WardrobePage() {
     <div className="container mx-auto py-8">
       <h1 className="text-3xl font-semibold mb-6 text-center">My Wardrobe</h1>
       {error && <p className="text-red-600 mb-4 text-center">{error}</p>}
-      <form onSubmit={addItem} className="max-w-md mx-auto bg-white p-6 shadow rounded space-y-3 mb-8">
-        <div>
+      <form onSubmit={addItem} className="max-w-xl mx-auto bg-white p-6 shadow rounded space-y-3 mb-8">
+      <div>
           <label className="block text-sm font-medium mb-1">Image URL</label>
           <input
             type="url"
@@ -81,14 +129,82 @@ export default function WardrobePage() {
             required
           />
         </div>
+        <button
+          type="button"
+          onClick={autoTag}
+          className="py-1 px-3 bg-blue-500 text-white rounded text-sm hover:bg-blue-600 transition"
+          disabled={tagging || !imageUrl}
+        >
+          {tagging ? 'Tagging…' : 'Auto Tag'}
+        </button>
         <div>
-          <label className="block text-sm font-medium mb-1">Description</label>
+          <label className="block text-sm font-medium mb-1">Category</label>
+          <input
+            type="text"
+            value={category}
+            onChange={e => setCategory(e.target.value)}
+            className="w-full px-3 py-2 border rounded"
+            placeholder="e.g., jacket"
+          />
+        </div>
+        <div>
+          <label className="block text-sm font-medium mb-1">Colors</label>
+          <input
+            type="text"
+            value={colors}
+            onChange={e => setColors(e.target.value)}
+            className="w-full px-3 py-2 border rounded"
+            placeholder="e.g., black, white"
+          />
+        </div>
+        <div>
+          <label className="block text-sm font-medium mb-1">Pattern</label>
+          <input
+            type="text"
+            value={pattern}
+            onChange={e => setPattern(e.target.value)}
+            className="w-full px-3 py-2 border rounded"
+            placeholder="e.g., striped"
+          />
+        </div>
+        <div>
+          <label className="block text-sm font-medium mb-1">Material</label>
+          <input
+            type="text"
+            value={material}
+            onChange={e => setMaterial(e.target.value)}
+            className="w-full px-3 py-2 border rounded"
+            placeholder="e.g., cotton"
+          />
+        </div>
+        <div>
+          <label className="block text-sm font-medium mb-1">Brand</label>
+          <input
+            type="text"
+            value={brand}
+            onChange={e => setBrand(e.target.value)}
+            className="w-full px-3 py-2 border rounded"
+            placeholder="e.g., Nike"
+          />
+        </div>
+        <div>
+          <label className="block text-sm font-medium mb-1">Fit Style</label>
+          <input
+            type="text"
+            value={fitStyle}
+            onChange={e => setFitStyle(e.target.value)}
+            className="w-full px-3 py-2 border rounded"
+            placeholder="e.g., loose"
+          />
+        </div>
+        <div>
+          <label className="block text-sm font-medium mb-1">Additional Description</label>
           <input
             type="text"
             value={description}
             onChange={e => setDescription(e.target.value)}
-            className="w-full px-3 py-2 border rounded focus:outline-none focus:ring focus:border-indigo-400"
-            required
+            className="w-full px-3 py-2 border rounded"
+            placeholder="Any extra details"
           />
         </div>
         <button type="submit" className="w-full py-2 rounded bg-green-600 text-white hover:bg-green-700 transition">
