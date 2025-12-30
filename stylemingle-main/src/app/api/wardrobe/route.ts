@@ -42,7 +42,7 @@ export async function POST(request: Request) {
   const id = crypto.randomUUID();
   const [item] = await db
     .insert(wardrobeItems)
-    .values({ id, userId, imageUrl, description, createdAt: Date.now() })
+    .values({ id, userId, imageUrl, description, createdAt: new Date() })
     .returning();
   return NextResponse.json(item);
 }
