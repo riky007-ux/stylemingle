@@ -1,7 +1,7 @@
 export const runtime = 'edge';
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { wardrobe_items } from '@/lib/schema';
+import { wardrobeItems } from '@/lib/schema';
 import { eq } from 'drizzle-orm';
 import jwt from 'jsonwebtoken';
 
@@ -28,8 +28,8 @@ export async function PUT(request: Request, { params }: { params: { id: string }
   const { id } = params;
   const body = await request.json();
   const { imageUrl, description } = body;
-  await db.update(wardrobe_items).set({ imageUrl, description }).where(eq(wardrobe_items.id, id));
-  const [item] = await db.select().from(wardrobe_items).where(eq(wardrobe_items.id, id));
+  await db.update(wardrobeItems).set({ imageUrl, description }).where(eq(wardrobeItems.id, id));
+  const [item] = await db.select().from(wardrobeItems).where(eq(wardrobeItems.id, id));
   return NextResponse.json(item);
 }
 
@@ -39,6 +39,6 @@ export async function DELETE(request: Request, { params }: { params: { id: strin
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
   const { id } = params;
-  await db.delete(wardrobe_items).where(eq(wardrobe_items.id, id));
+  await db.delete(wardrobeItems).where(eq(wardrobeItems.id, id));
   return NextResponse.json({ success: true });
 }
