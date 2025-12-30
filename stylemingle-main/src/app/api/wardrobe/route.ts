@@ -1,7 +1,7 @@
 export const runtime = 'edge';
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { wardrobe_items } from '@/lib/schema';
+import { wardrobeItems } from '@/lib/schema';
 import { eq } from 'drizzle-orm';
 import jwt from 'jsonwebtoken';
 
@@ -25,7 +25,7 @@ export async function GET(request: Request) {
   if (!userId) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
-  const items = await db.select().from(wardrobe_items).where(eq(wardrobe_items.userId, userId));
+  const items = await db.select().from(wardrobeItems).where(eq(wardrobeItems.userId, userId));
   return NextResponse.json(items);
 }
 
@@ -41,7 +41,7 @@ export async function POST(request: Request) {
   }
   const id = crypto.randomUUID();
   const [item] = await db
-    .insert(wardrobe_items)
+    .insert(wardrobeItems)
     .values({ id, userId, imageUrl, description, createdAt: Date.now() })
     .returning();
   return NextResponse.json(item);
