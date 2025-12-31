@@ -13,14 +13,14 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
-      <body className="bg-white text-gray-900">
-        <header className="border-b border-gray-200">
-          <nav className="container mx-auto flex items-center justify-between py-4 px-6">
+    <html lang="en" className="h-full">
+      <body className="min-h-screen bg-primary-bg text-deep-espresso font-sans">
+        <header className="border-b border-warm-taupe bg-secondary-bg shadow-soft">
+          <nav className="container mx-auto flex items-center justify-between py-m px-l">
             <div className="text-xl font-bold">
               <Link href="/">StyleMingle</Link>
             </div>
-            <ul className="flex space-x-6">
+            <ul className="flex space-x-m">
               <li>
                 <Link href="/login">Login</Link>
               </li>
@@ -33,7 +33,7 @@ export default function RootLayout({
             </ul>
           </nav>
         </header>
-        <main className="container mx-auto py-6 px-6">{children}</main>
+        <main className="container mx-auto py-l px-l">{children}</main>
       </body>
     </html>
   );
