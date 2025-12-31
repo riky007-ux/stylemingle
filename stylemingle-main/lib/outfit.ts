@@ -22,6 +22,10 @@ export interface Outfit {
   shoe: string;
   score: number;
   explanation: string;
+  topLayer: string;
+  bottomLayer: string;
+  shoeLayer: string;
+  accessoryLayer?: string;
 }
 
 export function generateOutfit(): Outfit {
@@ -46,5 +50,8 @@ export function generateOutfit(): Outfit {
     shoe: shoe.name,
     score,
     explanation,
+    topLayer: '/avatars/top.svg',
+    bottomLayer: '/avatars/bottom.svg',
+    shoeLayer: '/avatars/shoes.svg',
   };
 }
