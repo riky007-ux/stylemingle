@@ -2,33 +2,60 @@
 
 import { useState } from 'react';
 
-const styles = [
-  { style: 'Casual', description: 'Relaxed everyday look', emoji: '🧢' },
-  { style: 'Formal', description: 'Polished professional attire', emoji: '🎩' },
-  { style: 'Sporty', description: 'Active and athletic gear', emoji: '🏃‍♂️' },
+const sizes = [
+  { label: 'S', width: 120, height: 240 },
+  { label: 'M', width: 140, height: 280 },
+  { label: 'L', width: 160, height: 320 },
+  { label: 'XL', width: 180, height: 360 },
 ];
 
 export default function Page() {
-  const [selected, setSelected] = useState(styles[0]);
+  const [selectedSize, setSelectedSize] = useState(sizes[1]); // default M
+
   return (
     <div className="p-8">
       <h1 className="text-3xl font-bold mb-4">Avatar</h1>
-      <p className="mb-6">Customize your avatar's style.</p>
+      <p className="mb-4">Customize your avatar by selecting a body size.</p>
       <div className="flex space-x-4 mb-6">
-        {styles.map((s) => (
+        {sizes.map((s) => (
           <button
-            key={s.style}
-            onClick={() => setSelected(s)}
-            className={`border p-4 rounded-md ${selected.style === s.style ? 'bg-gray-100' : ''}`}
+            key={s.label}
+            onClick={() => setSelectedSize(s)}
+            className={`border p-2 rounded-md ${selectedSize.label === s.label ? 'bg-gray-100' : ''}`}
           >
-            <div className="text-3xl mb-2">{s.emoji}</div>
-            <div>{s.style}</div>
+            {s.label}
           </button>
         ))}
       </div>
-      <div>
-        <h2 className="text-xl font-semibold">Selected Style: {selected.style}</h2>
-        <p>{selected.description}</p>
+      <div
+        className="relative mx-auto"
+        style={{ width: selectedSize.width, height: selectedSize.height }}
+      >
+        <img
+          src={`/avatars/body-${selectedSize.label.toLowerCase()}.svg`}
+          alt="base body"
+          style={{ width: '100%', height: '100%', position: 'absolute', top: 0, left: 0 }}
+        />
+        <img
+          src="/avatars/top.svg"
+          alt="top layer"
+          style={{ width: '100%', height: '100%', position: 'absolute', top: 0, left: 0 }}
+        />
+        <img
+          src="/avatars/bottom.svg"
+          alt="bottom layer"
+          style={{ width: '100%', height: '100%', position: 'absolute', top: 0, left: 0 }}
+        />
+        <img
+          src="/avatars/shoes.svg"
+          alt="shoes layer"
+          style={{ width: '100%', height: '100%', position: 'absolute', top: 0, left: 0 }}
+        />
+        <img
+          src="/avatars/accessory.svg"
+          alt="accessory layer"
+          style={{ width: '100%', height: '100%', position: 'absolute', top: 0, left: 0 }}
+        />
       </div>
     </div>
   );
