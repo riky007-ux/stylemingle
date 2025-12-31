@@ -33,7 +33,7 @@ export default function Page() {
   }, [])
 
   const handleGenerate = () => {
-    if (!isPaid && !canGenerateOutfit()) {
+    if (!isPaid && !canGenerateOutfit(isPaid))) {
       setShowUpgrade(true)
       return
     }
