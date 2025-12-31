@@ -4,27 +4,29 @@ import { useState, useEffect } from 'react';
 import Button from '../../../components/Button';
 import Card from '../../../components/Card';
 import { generateOutfit } from '../../../lib/outfit';
-
-interface Outfit {
-  top: string;
-  bottom: string;
-  shoe: string;
-  score: number;
-  explanation: string;
-}
+import type { Outfit } from '../../../lib/outfit';
 
 export default function Page() {
   const [outfits, setOutfits] = useState<Outfit[]>([]);
   const [isPaid, setIsPaid] = useState<boolean>(false);
+  const [lastOutfit, setLastOutfit] = useState<Outfit | null>(null);
 
   useEffect(() => {
     const stored = localStorage.getItem('outfits');
     if (stored) {
-      setOutfits(JSON.parse(stored));
+      try {
+        setOutfits(JSON.parse(stored));
+      } catch {}
     }
     const paid = localStorage.getItem('isPaid');
     if (paid === 'true') {
       setIsPaid(true);
+    }
+    const storedLast = localStorage.getItem('lastOutfit');
+    if (storedLast) {
+      try {
+        setLastOutfit(JSON.parse(storedLast));
+      } catch {}
     }
   }, []);
 
@@ -39,6 +41,8 @@ export default function Page() {
     }
     const outfit = generateOutfit();
     setOutfits([...outfits, outfit]);
+    setLastOutfit(outfit);
+    localStorage.setItem('lastOutfit', JSON.stringify(outfit));
   };
 
   return (
@@ -48,6 +52,9 @@ export default function Page() {
       <Button variant="primary" onClick={handleGenerate}>Generate Outfit</Button>
       {!isPaid && outfits.length >= 5 && (
         <p className="text-pastel-coral font-semibold">You have reached the free limit. Upgrade to unlock unlimited outfits.</p>
+      )}
+      {lastOutfit && (
+        <p className="text-green-600 font-semibold">This outfit is now on your avatar.</p>
       )}
       <div className="space-y-m">
         {outfits.map((o, index) => (
