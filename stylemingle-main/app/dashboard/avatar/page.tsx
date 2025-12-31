@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import type { Outfit } from '../../../lib/outfit';
 
 const sizes = [
   { label: 'S', width: 120, height: 240 },
@@ -11,6 +12,19 @@ const sizes = [
 
 export default function Page() {
   const [selectedSize, setSelectedSize] = useState(sizes[1]); // default M
+  const [currentOutfit, setCurrentOutfit] = useState<Outfit | null>(null);
+
+  useEffect(() => {
+    const stored = typeof window !== 'undefined' ? localStorage.getItem('lastOutfit') : null;
+    if (stored) {
+      try {
+        const outfit = JSON.parse(stored) as Outfit;
+        setCurrentOutfit(outfit);
+      } catch (e) {
+        // ignore
+      }
+    }
+  }, []);
 
   return (
     <div className="p-8">
@@ -37,25 +51,27 @@ export default function Page() {
           style={{ width: '100%', height: '100%', position: 'absolute', top: 0, left: 0 }}
         />
         <img
-          src="/avatars/top.svg"
+          src={currentOutfit?.topLayer ?? '/avatars/top.svg'}
           alt="top layer"
           style={{ width: '100%', height: '100%', position: 'absolute', top: 0, left: 0 }}
         />
         <img
-          src="/avatars/bottom.svg"
+          src={currentOutfit?.bottomLayer ?? '/avatars/bottom.svg'}
           alt="bottom layer"
           style={{ width: '100%', height: '100%', position: 'absolute', top: 0, left: 0 }}
         />
         <img
-          src="/avatars/shoes.svg"
+          src={currentOutfit?.shoeLayer ?? '/avatars/shoes.svg'}
           alt="shoes layer"
           style={{ width: '100%', height: '100%', position: 'absolute', top: 0, left: 0 }}
         />
-        <img
-          src="/avatars/accessory.svg"
-          alt="accessory layer"
-          style={{ width: '100%', height: '100%', position: 'absolute', top: 0, left: 0 }}
-        />
+        {currentOutfit?.accessoryLayer && (
+          <img
+            src={currentOutfit.accessoryLayer}
+            alt="accessory layer"
+            style={{ width: '100%', height: '100%', position: 'absolute', top: 0, left: 0 }}
+          />
+        )}
       </div>
     </div>
   );
