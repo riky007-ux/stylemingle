@@ -24,6 +24,7 @@ export interface Outfit {
   explanation: string;
   topLayer: string;
   bottomLayer: string;
+  accessory?: string;
   shoeLayer: string;
   accessoryLayer?: string;
 }
@@ -55,3 +56,4 @@ export function generateOutfit(): Outfit {
     shoeLayer: '/avatars/shoes.svg',
   };
 }
+\nconst accessories = [\n  { name: 'Belt', color: 'dark' },\n  { name: 'Watch', color: 'light' },\n  { name: 'Glasses', color: 'light' },\n  { name: 'Sunglasses', color: 'dark' },\n  { name: 'Jewelry', color: 'light' },\n];

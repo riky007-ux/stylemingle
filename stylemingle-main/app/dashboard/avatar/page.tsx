@@ -4,10 +4,10 @@ import { useState, useEffect } from 'react';
 import type { Outfit } from '../../../lib/outfit';
 
 const sizes = [
-  { label: 'S', width: 120, height: 240 },
-  { label: 'M', width: 140, height: 280 },
-  { label: 'L', width: 160, height: 320 },
-  { label: 'XL', width: 180, height: 360 },
+  { label: 'S', width: 120, height: 260 },
+  { label: 'M', width: 140, height: 300 },
+  { label: 'L', width: 160, height: 340 },
+  { label: 'XL', width: 180, height: 380 },
 ];
 
 export default function Page() {

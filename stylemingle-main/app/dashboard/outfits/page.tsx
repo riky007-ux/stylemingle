@@ -35,10 +35,12 @@ export default function Page() {
   }, [])
 
   const handleGenerate = () => 
-    if (!isPaid && !canGenerateOutfit(isPaid))) 
-      setShowUpgrade(true)
-      return
-    }
+} if (!isPaid && !canGenerateOutfit(isPaid)) {
+  setShowUpgrade(true)
+  return
+}
+
+
     const newOutfit = generateOutfit()
     if (!isPaid) {
       incrementOutfitCount()

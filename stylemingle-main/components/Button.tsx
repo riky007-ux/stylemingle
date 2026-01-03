@@ -12,7 +12,7 @@ export default function Button({ variant = 'primary', children, className = '', 
     primary: 'bg-pastel-coral text-secondary-bg hover:shadow-hover',
     secondary: 'border border-pastel-coral text-pastel-coral hover:bg-pastel-coral hover:text-secondary-bg',
   };
-  const spacing = 'py-s px-m';
+  const spacing = 'py-m px-l';
   const classes = `${base} ${variants[variant] || variants.primary} ${spacing} ${className}`;
   return (
     <button className={classes.trim()} {...props}>
