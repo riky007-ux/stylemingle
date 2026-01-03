@@ -2,6 +2,9 @@
 
 import { useState, useEffect } from 'react';
 import type { Outfit } from '../../../lib/outfit';
+import Card from '../../../components/Card';
+import Button from '../../../components/Button';
+import Link from 'next/link';
 
 const sizes = [
   { label: 'S', width: 120, height: 260 },
@@ -25,6 +28,20 @@ export default function Page() {
       }
     }
   }, []);
+
+  if (!currentOutfit) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <Card className="text-center space-y-m">
+          <h2 className="text-xl font-semibold">Upload your first clothing items to see outfits appear on your avatar.</h2>
+          <p>Add a few tops, bottoms, and shoes to get started.</p>
+          <Link href="/dashboard/wardrobe">
+            <Button>Add your first item</Button>
+          </Link>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="p-8">
