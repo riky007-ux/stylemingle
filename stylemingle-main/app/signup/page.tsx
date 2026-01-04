@@ -8,6 +8,7 @@ import Card from '../../components/Card';
 
 export default function Page() {
   const router = useRouter();
+  const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -30,52 +31,34 @@ export default function Page() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ name, email, password }),
       });
-      if (response.ok) {
+
+      if (!response.ok) {
         const data = await response.json();
-        const token = data.token;
-        if (token) {
-          localStorage.setItem('token', token);
-          router.push('/dashboard');
-        } else {
-          setError('Invalid server response');
-        }
-      } else {
-        const data = await response.json().catch(() => null);
         setError(data?.error || 'Signup failed');
+        return;
       }
+
+      const data = await response.json();
+      localStorage.setItem('token', data.token);
+      router.replace('/dashboard');
     } catch (err) {
-      setError('An error occurred. Please try again.');
+      setError('An error occurred');
     }
   };
 
   return (
     <Card>
-      <h1 className="text-2xl font-bold mb-4">Sign Up</h1>
-      {error && <p className="text-red-500 mb-4">{error}</p>}
+      <h2>Sign Up</h2>
       <form onSubmit={handleSubmit}>
-        <input
-          type="email"
-          placeholder="Email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          className="w-full mb-2 p-2 border border-gray-300 rounded"
-          required
-        />
-        <input
-          type="password"
-          placeholder="Password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          className="w-full mb-4 p-2 border border-gray-300 rounded"
-          required
-        />
+        {error && <p style={{ color: 'red' }}>{error}</p>}
+        <input type="text" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
+        <input type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} />
+        <input type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} />
         <Button type="submit">Sign Up</Button>
       </form>
-      <p className="mt-4">
-        Already have an account? <Link href="/login">Login</Link>
-      </p>
+      <p>Already have an account? <Link href="/login">Log in</Link></p>
     </Card>
   );
 }
