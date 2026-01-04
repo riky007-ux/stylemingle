@@ -1,61 +1,50 @@
+'use client';
 
-'use client'
-
-import { useState, useEffect } from 'react'
-import Button from '../../../components/Button'
-import Card from '../../../components/Card'
-import { generateOutfit } from '../../../lib/outfit'
-import type { Outfit } from '../../../lib/outfit'
-import { canGenerateOutfit, incrementOutfitCount, FREE_OUTFIT_LIMIT_PER_DAY } from '../../../lib/tier'
+import { useEffect, useState } from 'react';
+import Button from '@/components/Button';
+import Card from '@/components/Card';
+import { generateOutfit, type Outfit } from '@/lib/outfit';
+import { FREE_OUTFIT_LIMIT_PER_DAY, canGenerateOutfit, incrementOutfitCount } from '@/lib/tier';
 
 export default function Page() {
-  const [outfits, setOutfits] = useState<Outfit[]>([])
-  const [isPaid, setIsPaid] = useState<boolean>(false)
-  const [lastOutfit, setLastOutfit] = useState<Outfit | null>(null)
-  const [showUpgrade, setShowUpgrade] = useState<boolean>(false)
+  const [outfits, setOutfits] = useState<Outfit[]>([]);
+  const [lastOutfit, setLastOutfit] = useState<Outfit | null>(null);
+  const [showUpgrade, setShowUpgrade] = useState(false);
+  const [isPaid, setIsPaid] = useState(false);
 
   useEffect(() => {
-    const stored = localStorage.getItem('outfits')
+    const stored = localStorage.getItem('outfits');
     if (stored) {
-      try {
-        setOutfits(JSON.parse(stored))
-      } catch {}
+      const parsed: Outfit[] = JSON.parse(stored);
+      setOutfits(parsed);
+      if (parsed.length > 0) {
+        setLastOutfit(parsed[0]);
+      }
     }
-    const paid = localStorage.getItem('isPaid')
-    if (paid === 'true') {
-      setIsPaid(true)
+    const paidFlag = localStorage.getItem('isPaid');
+    if (paidFlag === 'true') {
+      setIsPaid(true);
     }
-    const storedLast = localStorage.getItem('lastOutfit')
-    if (storedLast) {
-      try {
-        setLastOutfit(JSON.parse(storedLast))
-      } catch {}
-    }
-  }, [])
+  }, []);
 
-  const handleGenerate = () => 
-} if (!isPaid && !canGenerateOutfit(isPaid)) {
-  setShowUpgrade(true)
-  return
-}
-
-
-    const newOutfit = generateOutfit()
-    if (!isPaid) {
-      incrementOutfitCount()
+  const handleGenerate = () => {
+    if (!isPaid && !canGenerateOutfit(isPaid)) {
+      setShowUpgrade(true);
+      return;
     }
-    const newOutfits = [newOutfit, ...outfits]
-    setOutfits(newOutfits)
-    localStorage.setItem('outfits', JSON.stringify(newOutfits))
-    localStorage.setItem('lastOutfit', JSON.stringify(newOutfit))
-    setLastOutfit(newOutfit)
-    setShowUpgrade(false)
-  }
+    const newOutfit = generateOutfit();
+    const newOutfits = [newOutfit, ...outfits];
+    setOutfits(newOutfits);
+    setLastOutfit(newOutfit);
+    localStorage.setItem('outfits', JSON.stringify(newOutfits));
+    incrementOutfitCount(isPaid);
+  };
 
   const handleClear = () => {
-    setOutfits([])
-    localStorage.removeItem('outfits')
-  }
+    setOutfits([]);
+    setLastOutfit(null);
+    localStorage.removeItem('outfits');
+  };
 
   return (
     <div className="space-y-l">
@@ -68,7 +57,9 @@ export default function Page() {
         </p>
       )}
       {lastOutfit && (
-        <p className="text-green-600 font-semibold">This outfit is now on your avatar.</p>
+        <p className="text-green-600 font-semibold">
+          This outfit is now on your avatar.
+        </p>
       )}
       <div className="space-y-m">
         {outfits.map((o, index) => (
@@ -83,6 +74,9 @@ export default function Page() {
           </Card>
         ))}
       </div>
+      {outfits.length > 0 && (
+        <Button variant="secondary" onClick={handleClear}>Clear Outfits</Button>
+      )}
     </div>
-  )
+  );
 }
