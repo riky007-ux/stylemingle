@@ -6,6 +6,7 @@ import { users } from '@/lib/schema';
 import { eq } from 'drizzle-orm';
 import bcrypt from 'bcryptjs';
 import { randomUUID } from 'crypto';
+import jwt from 'jsonwebtoken';
 
 export async function POST(req: Request) {
   try {
@@ -23,9 +24,10 @@ export async function POST(req: Request) {
     }
 
     const hashed = await bcrypt.hash(password, 10);
+    const id = randomUUID();
 
     await db.insert(users).values({
-      id: randomUUID(),
+      id,
       email,
       passwordHash: hashed,
       name,
@@ -33,7 +35,10 @@ export async function POST(req: Request) {
       createdAt: new Date(),
     });
 
-    return NextResponse.json({ success: true }, { status: 201 });
+    const secret = process.env.AUTH_SECRET || 'secret';
+    const token = jwt.sign({ userId: id }, secret, { expiresIn: '7d' });
+
+    return NextResponse.json({ token }, { status: 201 });
   } catch (err) {
     console.error(err);
     return NextResponse.json({ error: 'Server error' }, { status: 500 });
