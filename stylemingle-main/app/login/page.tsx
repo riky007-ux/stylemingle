@@ -1,4 +1,5 @@
 'use client';
+
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
@@ -24,64 +25,57 @@ export default function Page() {
     e.preventDefault();
     setError('');
     try {
-      const res = await fetch('/api/auth/login', {
+      const response = await fetch('/api/auth/login', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ email, password }),
       });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error((data && (data as any).error) || 'Login failed');
-      }
-      const data = await res.json();
-      if (data && (data as any).token) {
-        if (typeof window !== 'undefined') {
-          localStorage.setItem('token', (data as any).token);
+      if (response.ok) {
+        const data = await response.json();
+        const token = data.token;
+        if (token) {
+          localStorage.setItem('token', token);
+          router.push('/dashboard');
+        } else {
+          setError('Invalid server response');
         }
-        router.replace('/dashboard');
       } else {
-        throw new Error('Invalid response from server');
+        const data = await response.json().catch(() => null);
+        setError(data?.error || 'Login failed');
       }
-    } catch (err: any) {
-      setError(err.message || 'Something went wrong');
+    } catch (err) {
+      setError('An error occurred. Please try again.');
     }
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center">
-      <Card className="w-full max-w-sm space-y-m">
-        <h1 className="text-2xl font-bold text-center">Login</h1>
-        <form onSubmit={handleSubmit} className="space-y-s">
-          {error && <div className="text-red-500">{error}</div>}
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="Email"
-            className="w-full border border-warm-taupe rounded-btn px-m py-s"
-            required
-          />
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="Password"
-            className="w-full border border-warm-taupe rounded-btn px-m py-s"
-            required
-          />
-          <Button type="submit" variant="primary" className="w-full">
-            Log In
-          </Button>
-        </form>
-        <p className="text-center text-sm">
-          Don't have an account?{' '}
-          <Link href="/signup" className="text-pastel-coral hover:underline">
-            Sign up
-          </Link>
-        </p>
-      </Card>
-    </div>
+    <Card>
+      <h1 className="text-2xl font-bold mb-4">Login</h1>
+      {error && <p className="text-red-500 mb-4">{error}</p>}
+      <form onSubmit={handleSubmit}>
+        <input
+          type="email"
+          placeholder="Email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          className="w-full mb-2 p-2 border border-gray-300 rounded"
+          required
+        />
+        <input
+          type="password"
+          placeholder="Password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          className="w-full mb-4 p-2 border border-gray-300 rounded"
+          required
+        />
+        <Button type="submit">Login</Button>
+      </form>
+      <p className="mt-4">
+        Don't have an account? <Link href="/signup">Sign up</Link>
+      </p>
+    </Card>
   );
 }
