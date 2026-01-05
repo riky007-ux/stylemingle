@@ -1,1 +1,0 @@
-# StyleMingle MVP
