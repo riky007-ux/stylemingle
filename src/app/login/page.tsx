@@ -1,11 +1,15 @@
 "use client";
 
 import React, { useState } from "react";
+import { useRouter } from "next/navigation";
+
+const TOKEN_KEY = "authToken";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState<string | null>(null);
+  const router = useRouter();
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -18,7 +22,12 @@ export default function LoginPage() {
       });
       const data = await res.json();
       if (res.ok) {
+        const token = data.token;
+        if (token) {
+          localStorage.setItem(TOKEN_KEY, token);
+        }
         setMessage("Success");
+        router.push("/dashboard");
       } else {
         setMessage(data?.error || "Error");
       }
