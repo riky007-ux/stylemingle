@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { outfits, ratings } from '@/lib/schema';
+import schema from '@/lib/schema';
+const { outfits, ratings } = schema;
 import { eq } from 'drizzle-orm';
 import jwt from 'jsonwebtoken';
 
@@ -64,7 +65,7 @@ export async function POST(req: Request) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: \`Bearer \${OPENAI_API_KEY}\`,
+Authorization: "Bearer " + process.env.OPENAI_API_KEY,
       },
       body: JSON.stringify({
         model: 'gpt-3.5-turbo',
