@@ -3,11 +3,11 @@
   "/api/auth/login/route": "app/api/auth/login/route.js",
   "/api/auth/signup/route": "app/api/auth/signup/route.js",
   "/api/outfits/route": "app/api/outfits/route.js",
-  "/avatar/page": "app/avatar/page.js",
   "/api/ratings/route": "app/api/ratings/route.js",
+  "/avatar/page": "app/avatar/page.js",
   "/dashboard/page": "app/dashboard/page.js",
-  "/dashboard/wardrobe/page": "app/dashboard/wardrobe/page.js",
   "/login/page": "app/login/page.js",
   "/page": "app/page.js",
+  "/dashboard/wardrobe/page": "app/dashboard/wardrobe/page.js",
   "/signup/page": "app/signup/page.js"
 }
