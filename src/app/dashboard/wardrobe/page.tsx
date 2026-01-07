@@ -8,6 +8,7 @@ const TOKEN_KEY = 'authToken';
 export default function WardrobePage() {
   const router = useRouter();
   const [items, setItems] = useState<string[]>([]);
+  const [addedMessage, setAddedMessage] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -43,9 +44,12 @@ export default function WardrobePage() {
           }
           return newItems;
         });
+        setAddedMessage('Item added and saved!');
+        setTimeout(() => {
+          setAddedMessage('');
+        }, 2000);
       };
       reader.readAsDataURL(file);
-      // reset input to allow uploading same file again
       (e.target as HTMLInputElement).value = '';
     }
   };
@@ -55,10 +59,16 @@ export default function WardrobePage() {
       <h1 className="text-2xl font-semibold mb-4">Wardrobe</h1>
       <button
         onClick={handleAddClick}
-        className="mb-4 px-4 py-2 bg-blue-500 text-white rounded"
+        className="mb-2 px-4 py-2 bg-blue-500 text-white rounded"
       >
         Add Item
       </button>
+      {addedMessage && (
+        <p className="mb-2 text-sm text-green-600">{addedMessage}</p>
+      )}
+      <p className="mb-4 text-sm text-gray-600">
+        Your wardrobe items are saved on this device.
+      </p>
       <input
         type="file"
         accept="image/*"
