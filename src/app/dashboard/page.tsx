@@ -15,10 +15,16 @@ export default function DashboardPage() {
     }
   }, [router]);
 
+  const handleLogout = () => {
+    localStorage.removeItem(TOKEN_KEY);
+    router.replace("/login");
+  };
+
   return (
     <main>
       <h1>Dashboard</h1>
       <p>Welcome to your dashboard.</p>
+      <button onClick={handleLogout}>Logout</button>
     </main>
   );
 }
