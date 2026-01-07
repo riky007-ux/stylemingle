@@ -1,60 +1,28 @@
-"use client";
+'use client';
 
-import React, { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 
-const TOKEN_KEY = "authToken";
+const TOKEN_KEY = 'authToken';
 
-export default function SignupPage() {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [message, setMessage] = useState<string | null>(null);
+export default function DashboardPage() {
   const router = useRouter();
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setMessage(null);
-    try {
-      const res = await fetch("/api/auth/signup", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        const token = data.token;
-        if (token) {
-          localStorage.setItem(TOKEN_KEY, token);
-        }
-        setMessage("Success");
-        router.push("/dashboard");
-      } else {
-        setMessage(data?.error || "Error");
-      }
-    } catch (err) {
-      setMessage("Error");
+  useEffect(() => {
+    const token = localStorage.getItem(TOKEN_KEY);
+    if (!token) {
+      router.replace('/login');
     }
-  }
+  }, [router]);
 
   return (
-    <div>
-      <h1>Sign Up</h1>
-      <form onSubmit={handleSubmit}>
-        <input
-          type="email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          placeholder="Email"
-        />
-        <input
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          placeholder="Password"
-        />
-        <button type="submit">Sign Up</button>
-      </form>
-      {message && <p>{message}</p>}
-    </div>
+    <main className="p-4">
+      <h1 className="text-2xl font-semibold mb-4">Dashboard</h1>
+      <p className="mb-4">Welcome to your dashboard.</p>
+      <Link href="/dashboard/wardrobe" className="inline-block px-4 py-2 bg-blue-500 text-white rounded">
+        Add Item
+      </Link>
+    </main>
   );
 }
