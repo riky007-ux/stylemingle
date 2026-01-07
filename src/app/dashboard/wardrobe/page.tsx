@@ -54,9 +54,22 @@ export default function WardrobePage() {
     }
   };
 
+  const handleLogout = () => {
+    localStorage.removeItem(TOKEN_KEY);
+    router.replace('/login');
+  };
+
   return (
     <main className="p-4">
-      <h1 className="text-2xl font-semibold mb-4">Wardrobe</h1>
+      <div className="flex justify-between items-center mb-4">
+        <h1 className="text-2xl font-semibold">Wardrobe</h1>
+        <button
+          onClick={handleLogout}
+          className="px-4 py-2 bg-red-500 text-white rounded"
+        >
+          Logout
+        </button>
+      </div>
       <button
         onClick={handleAddClick}
         className="mb-2 px-4 py-2 bg-blue-500 text-white rounded"
@@ -77,14 +90,18 @@ export default function WardrobePage() {
         className="hidden"
         onChange={handleFileChange}
       />
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 gap-4">
         {items.map((src, idx) => (
-          <img
+          <div
             key={idx}
-            src={src}
-            alt={`Item ${idx}`}
-            className="w-full h-40 object-cover rounded"
-          />
+            className="w-full aspect-square overflow-hidden rounded"
+          >
+            <img
+              src={src}
+              alt={`Item ${idx}`}
+              className="w-full h-full object-cover"
+            />
+          </div>
         ))}
       </div>
     </main>
