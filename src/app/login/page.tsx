@@ -26,19 +26,22 @@ export default function LoginPage() {
         if (token) {
           localStorage.setItem(TOKEN_KEY, token);
         }
-        setMessage("Success");
-        router.push("/dashboard");
+        // show confirmation
+        setMessage("Logged in successfully!");
+        setTimeout(() => {
+          router.push("/dashboard");
+        }, 500);
       } else {
-        setMessage(data?.error || "Error");
+        setMessage(data?.error || "Login failed. Please try again.");
       }
     } catch (err) {
-      setMessage("Error");
+      setMessage("Login failed. Please try again.");
     }
   }
 
   return (
     <div>
-      <h1>Login</h1>
+      <h1>Log In</h1>
       <form onSubmit={handleSubmit}>
         <input
           type="email"
@@ -52,7 +55,7 @@ export default function LoginPage() {
           onChange={(e) => setPassword(e.target.value)}
           placeholder="Password"
         />
-        <button type="submit">Login</button>
+        <button type="submit">Log In</button>
       </form>
       {message && <p>{message}</p>}
     </div>
