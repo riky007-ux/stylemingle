@@ -1,167 +1,102 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
-import { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState } from 'react';
 
 const TOKEN_KEY = 'authToken';
 
-export default function WardrobePage() {
-  const router = useRouter();
-  const [items, setItems] = useState<string[]>([]);
-  const [addedMessage, setAddedMessage] = useState('');
+interface WardrobeItem {
+  id: string;
+  imageUrl: string;
+}
 
-  // Refs for inputs
-  const cameraInputRef = useRef<HTMLInputElement>(null);
-  const libraryInputRef = useRef<HTMLInputElement>(null);
+export default function WardrobePage() {
+  const [items, setItems] = useState<WardrobeItem[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+
+  const fetchItems = async () => {
+    const token = typeof window !== 'undefined' ? localStorage.getItem(TOKEN_KEY) : null;
+    if (!token) {
+      setItems([]);
+      setLoading(false);
+      return;
+    }
+    try {
+      const res = await fetch('/api/wardrobe/items', {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        // API may return { items: [...] } or array directly
+        const itemsList = Array.isArray(data) ? data : (data.items || []);
+        setItems(itemsList);
+      } else {
+        setItems([]);
+      }
+    } catch (err) {
+      console.error(err);
+      setItems([]);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const token = localStorage.getItem(TOKEN_KEY);
-    if (!token) {
-      router.replace('/login');
-      return;
-    }
-    const stored = localStorage.getItem(`wardrobe_${token}`);
-    if (stored) {
-      try {
-        const list = JSON.parse(stored);
-        setItems(list);
-      } catch {
-        // ignore parse errors
-      }
-    }
-  }, [router]);
+    fetchItems();
+  }, []);
 
-  const handleTakePhotoClick = () => {
-    cameraInputRef.current?.click();
-  };
-
-  const handleChooseLibraryClick = () => {
-    libraryInputRef.current?.click();
-  };
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) {
-      return;
-    }
-    const img = new Image();
-    img.onload = () => {
-      const maxDim = 1024;
-      let { width, height } = img;
-      if (width > height) {
-        if (width > maxDim) {
-          height = height * (maxDim / width);
-          width = maxDim;
-        }
-      } else {
-        if (height > maxDim) {
-          width = width * (maxDim / height);
-          height = maxDim;
-        }
-      }
-      const canvas = document.createElement('canvas');
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) {
-        setAddedMessage('Failed to process image.');
-        return;
-      }
-      ctx.drawImage(img, 0, 0, width, height);
-      const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.8);
-      setItems((prev) => {
-        const newItems = [...prev, compressedDataUrl];
-        try {
-          const token = localStorage.getItem(TOKEN_KEY);
-          if (token) {
-            localStorage.setItem(`wardrobe_${token}`, JSON.stringify(newItems));
-          }
-          setAddedMessage('Item added and saved!');
-          setTimeout(() => {
-            setAddedMessage('');
-          }, 2000);
-          return newItems;
-        } catch {
-          setAddedMessage('Image too large to save on this device. Please try a smaller photo.');
-          return prev;
-        }
-      });
-    };
-    img.onerror = () => {
-      setAddedMessage('Failed to process image.');
-    };
-    const reader = new FileReader();
-    reader.onload = () => {
-      img.src = reader.result as string;
-    };
-    reader.readAsDataURL(file);
-    (e.target as HTMLInputElement).value = '';
-  };
-
-  const handleLogout = () => {
+  const handleUpload = async (imageUrl: string) => {
+    const token = typeof window !== 'undefined' ? localStorage.getItem(TOKEN_KEY) : null;
+    if (!token || !imageUrl) return;
     try {
-      localStorage.removeItem(TOKEN_KEY);
-    } catch {
-      // ignore
+      await fetch('/api/wardrobe/upload', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ imageUrl }),
+      });
+      // re-fetch items after upload
+      fetchItems();
+    } catch (err) {
+      console.error(err);
     }
-    router.replace('/login');
+  };
+
+  const handleFileInput = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (!event.target.files || event.target.files.length === 0) return;
+    const file = event.target.files[0];
+    // create temporary URL; in real app, would upload file separately
+    const imageUrl = URL.createObjectURL(file);
+    await handleUpload(imageUrl);
   };
 
   return (
-    <main className="p-4">
-      <div className="flex justify-between items-center mb-4">
-        <h1 className="text-2xl font-semibold">Wardrobe</h1>
-        <button
-          onClick={handleLogout}
-          className="px-4 py-2 bg-red-500 text-white rounded"
-        >
-          Logout
-        </button>
-      </div>
-
-      {/* Upload actions */}
-      <div className="mt-4 flex gap-3">
-        <button
-          type="button"
-          onClick={() => cameraInputRef.current?.click()}
-          className="px-4 py-2 rounded bg-blue-600 text-white"
-        >
-          Take Photo
-        </button>
-
-        <button
-          type="button"
-          onClick={() => libraryInputRef.current?.click()}
-          className="px-4 py-2 rounded bg-gray-600 text-white"
-        >
-          Choose from Library
-        </button>
-      </div>
-
-      {/* Hidden file inputs */}
-      <div aria-hidden="true" style={{ display: 'none' }}>
+    <div className="p-4">
+      <h1 className="text-xl font-bold mb-4">My Wardrobe</h1>
+      {loading ? (
+        <p>Loading...</p>
+      ) : items.length === 0 ? (
+        <p>No items yet.</p>
+      ) : (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {items.map((item) => (
+            <div key={item.id} className="border p-2">
+              <img src={item.imageUrl} alt="Wardrobe item" className="w-full h-auto" />
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="mt-4">
         <input
-          ref={cameraInputRef}
           type="file"
           accept="image/*"
-          capture="environment"
-          onChange={handleFileChange}
-        />
-        <input
-          ref={libraryInputRef}
-          type="file"
-          accept="image/*"
-          onChange={handleFileChange}
+          onChange={handleFileInput}
+          className="mb-2"
         />
       </div>
-
-      <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 gap-4">
-        {items.map((src, idx) => (
-          <div key={idx} className="w-full aspect-square overflow-hidden rounded">
-            <img src={src} alt={`Item ${idx}`} className="w-full h-full object-cover" />
-          </div>
-        ))}
-      </div>
-    </main>
+    </div>
   );
 }
