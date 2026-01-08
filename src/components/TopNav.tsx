@@ -1,44 +1,49 @@
 "use client";
-import Link from "next/link";
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import Link from 'next/link';
+import { useState, useEffect } from 'react';
 
 const TopNav = () => {
-  const [loggedIn, setLoggedIn] = useState(false);
-  const router = useRouter();
+  const [token, setToken] = useState<string | null>(null);
+  const [isMounted, setIsMounted] = useState(false);
 
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      const token = localStorage.getItem('authToken');
-      setLoggedIn(!!token);
-    }
+    const storedToken = localStorage.getItem("authToken");
+    setToken(storedToken);
+    setIsMounted(true);
   }, []);
 
   const handleLogout = () => {
-    if (typeof window !== "undefined") {
-      localStorage.removeItem('authToken');
-      router.push('/login');
-    }
+    localStorage.removeItem("authToken");
+    window.location.href = "/login";
   };
 
+  if (!isMounted) {
+    return (
+      <nav className="flex justify-between items-center p-4 border-b">
+        <Link href="/">StyleMingle</Link>
+        <Link href="/dashboard">Dashboard</Link>
+      </nav>
+    );
+  }
+
   return (
-    <nav>
-      <ul style={{ display: 'flex', gap: '1rem', listStyle: 'none', padding: 0 }}>
-        <li><Link href="/">StyleMingle</Link></li>
-        {!loggedIn ? (
+    <nav className="flex justify-between items-center p-4 border-b">
+      <Link href="/">StyleMingle</Link>
+      <div className="space-x-4">
+        {token ? (
           <>
-            <li><Link href="/login">Login</Link></li>
-            <li><Link href="/signup">Sign Up</Link></li>
-            <li><Link href="/dashboard">Dashboard</Link></li>
+            <Link href="/dashboard">Dashboard</Link>
+            <Link href="/dashboard/wardrobe">Wardrobe</Link>
+            <button onClick={handleLogout}>Logout</button>
           </>
         ) : (
           <>
-            <li><Link href="/dashboard">Dashboard</Link></li>
-            <li><Link href="/dashboard/wardrobe">Wardrobe</Link></li>
-            <li><button onClick={handleLogout}>Logout</button></li>
+            <Link href="/login">Login</Link>
+            <Link href="/signup">Sign Up</Link>
+            <Link href="/dashboard">Dashboard</Link>
           </>
         )}
-      </ul>
+      </div>
     </nav>
   );
 };
