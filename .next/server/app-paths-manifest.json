@@ -4,10 +4,12 @@
   "/api/auth/signup/route": "app/api/auth/signup/route.js",
   "/api/outfits/route": "app/api/outfits/route.js",
   "/api/ratings/route": "app/api/ratings/route.js",
+  "/api/wardrobe/items/route": "app/api/wardrobe/items/route.js",
+  "/api/wardrobe/upload/route": "app/api/wardrobe/upload/route.js",
   "/avatar/page": "app/avatar/page.js",
   "/dashboard/page": "app/dashboard/page.js",
+  "/dashboard/wardrobe/page": "app/dashboard/wardrobe/page.js",
   "/login/page": "app/login/page.js",
   "/page": "app/page.js",
-  "/dashboard/wardrobe/page": "app/dashboard/wardrobe/page.js",
   "/signup/page": "app/signup/page.js"
 }
