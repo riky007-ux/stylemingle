@@ -34,7 +34,7 @@ export default function DashboardPage() {
       </div>
       <p className="mb-4">Welcome to your dashboard.</p>
       <Link href="/dashboard/wardrobe" className="inline-block px-4 py-2 bg-blue-500 text-white rounded">
-        Add Item
+      Wardrobe   
       </Link>
     </main>
   );
