@@ -1,50 +1,34 @@
-"use client";
+'use client';
 
-import { useEffect, useState } from "react";
-import Link from "next/link";
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { useAuth } from '../context/AuthContext';
 
 export default function TopNav() {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-
-  const checkAuth = () => {
-    if (typeof window === "undefined") return;
-    const token = localStorage.getItem("authToken");
-    setIsAuthenticated(!!token);
-  };
-
-  useEffect(() => {
-    checkAuth();
-
-    window.addEventListener("focus", checkAuth);
-    window.addEventListener("storage", checkAuth);
-
-    return () => {
-      window.removeEventListener("focus", checkAuth);
-      window.removeEventListener("storage", checkAuth);
-    };
-  }, []);
+  const { isAuthenticated, login, logout } = useAuth();
+  const router = useRouter();
 
   const handleLogout = () => {
-    localStorage.removeItem("authToken");
-    checkAuth();
-    window.location.href = "/login";
+    logout();
+    router.push('/login');
   };
 
   return (
-    <nav style={{ padding: "1rem", borderBottom: "1px solid #ddd" }}>
-      <strong>StyleMingle</strong>
-
-      <div style={{ marginTop: "0.5rem" }}>
-        {!isAuthenticated ? (
+    <nav className="flex items-center justify-between p-4 shadow-md">
+      <div className="text-xl font-bold">
+        <Link href="/">StyleMingle</Link>
+      </div>
+      <div className="flex space-x-4">
+        {isAuthenticated ? (
           <>
-            <Link href="/login">Login</Link>{" "}
-            <Link href="/signup">Sign Up</Link>
+            <Link href="/dashboard">Dashboard</Link>
+            <Link href="/wardrobe">Wardrobe</Link>
+            <button onClick={handleLogout}>Logout</button>
           </>
         ) : (
           <>
-            <Link href="/dashboard">Dashboard</Link>{" "}
-            <Link href="/dashboard/wardrobe">Wardrobe</Link>{" "}
-            <button onClick={handleLogout}>Logout</button>
+            <Link href="/login">Login</Link>
+            <Link href="/signup">Sign Up</Link>
           </>
         )}
       </div>

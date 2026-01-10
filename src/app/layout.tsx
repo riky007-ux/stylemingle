@@ -1,7 +1,9 @@
 'use client';
+
 import './globals.css';
 import type { Metadata } from 'next';
 import TopNav from '../components/TopNav';
+import { AuthProvider } from '../context/AuthContext';
 
 export const metadata: Metadata = {
   title: 'StyleMingle',
@@ -16,10 +18,10 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body>
-        <TopNav />
-        <main>
+        <AuthProvider>
+          <TopNav />
           {children}
-        </main>
+        </AuthProvider>
       </body>
     </html>
   );
