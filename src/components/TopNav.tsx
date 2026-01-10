@@ -1,51 +1,53 @@
 "use client";
-import Link from 'next/link';
-import { useState, useEffect } from 'react';
 
-const TopNav = () => {
-  const [token, setToken] = useState<string | null>(null);
-  const [isMounted, setIsMounted] = useState(false);
+import { useEffect, useState } from "react";
+import Link from "next/link";
+
+export default function TopNav() {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+
+  const checkAuth = () => {
+    if (typeof window === "undefined") return;
+    const token = localStorage.getItem("authToken");
+    setIsAuthenticated(!!token);
+  };
 
   useEffect(() => {
-    const storedToken = localStorage.getItem("authToken");
-    setToken(storedToken);
-    setIsMounted(true);
+    checkAuth();
+
+    window.addEventListener("focus", checkAuth);
+    window.addEventListener("storage", checkAuth);
+
+    return () => {
+      window.removeEventListener("focus", checkAuth);
+      window.removeEventListener("storage", checkAuth);
+    };
   }, []);
 
   const handleLogout = () => {
     localStorage.removeItem("authToken");
+    checkAuth();
     window.location.href = "/login";
   };
 
-  if (!isMounted) {
-    return (
-      <nav className="flex justify-between items-center p-4 border-b">
-        <Link href="/">StyleMingle</Link>
-        <Link href="/dashboard">Dashboard</Link>
-      </nav>
-    );
-  }
-
   return (
-    <nav className="flex justify-between items-center p-4 border-b">
-      <Link href="/">StyleMingle</Link>
-      <div className="space-x-4">
-        {token ? (
+    <nav style={{ padding: "1rem", borderBottom: "1px solid #ddd" }}>
+      <strong>StyleMingle</strong>
+
+      <div style={{ marginTop: "0.5rem" }}>
+        {!isAuthenticated ? (
           <>
-            <Link href="/dashboard">Dashboard</Link>
-            <Link href="/dashboard/wardrobe">Wardrobe</Link>
-            <button onClick={handleLogout}>Logout</button>
+            <Link href="/login">Login</Link>{" "}
+            <Link href="/signup">Sign Up</Link>
           </>
         ) : (
           <>
-            <Link href="/login">Login</Link>
-            <Link href="/signup">Sign Up</Link>
-            <Link href="/dashboard">Dashboard</Link>
+            <Link href="/dashboard">Dashboard</Link>{" "}
+            <Link href="/dashboard/wardrobe">Wardrobe</Link>{" "}
+            <button onClick={handleLogout}>Logout</button>
           </>
         )}
       </div>
     </nav>
   );
-};
-
-export default TopNav;
+}
