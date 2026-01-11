@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import ratings from "@/lib/schema";
+import { ratings } from "@/lib/schema";
 
 export async function POST(req: Request) {
   try {
