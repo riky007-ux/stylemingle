@@ -12,3 +12,19 @@ export const wardrobe_items = sqliteTable('wardrobe_items', {
   imageUrl: text('imageUrl').notNull(),
   createdAt: integer('createdAt', { mode: 'timestamp' }).notNull(),
 });
+
+export const outfits = sqliteTable('outfits', {
+  id: text('id').primaryKey(),
+  userId: text('userId').notNull().references(() => users.id),
+  createdAt: integer('createdAt', { mode: 'timestamp' }).notNull(),
+});
+
+export const ratings = sqliteTable('ratings', {
+  id: text('id').primaryKey(),
+  outfitId: text('outfitId').notNull().references(() => outfits.id),
+  rating: integer('rating').notNull(),
+  userId: text('userId').notNull().references(() => users.id),
+  createdAt: integer('createdAt', { mode: 'timestamp' }).notNull(),
+});
+
+export default { users, wardrobe_items, outfits, ratings };
