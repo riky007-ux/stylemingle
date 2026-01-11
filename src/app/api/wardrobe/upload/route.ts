@@ -1,33 +1,50 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db';
-import { wardrobe_items } from '@/lib/schema';
-import { getUserIdFromAuthHeader } from '@/lib/auth';
+import { NextResponse } from "next/server";
+import { db } from "@/lib/db";
+import { wardrobe_items } from "@/lib/schema";
+import jwt from "jsonwebtoken";
 
-export async function POST(req: NextRequest) {
-  const userId = getUserIdFromAuthHeader(req.headers);
-  if (!userId) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-  let body: any;
+const SECRET = process.env.NEXTAUTH_SECRET || "secret";
+
+function getUserId(req: Request): string | null {
+  const auth = req.headers.get("authorization");
+  if (!auth) return null;
+
+  const token = auth.split(" ")[1];
   try {
-    body = await req.json();
+    const decoded = jwt.verify(token, SECRET) as any;
+    return decoded.userId as string;
   } catch {
-    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
+    return null;
   }
-  const imageUrl = body?.imageUrl;
-  if (!imageUrl || typeof imageUrl !== 'string') {
-    return NextResponse.json({ error: 'Invalid imageUrl' }, { status: 400 });
+}
+
+export async function POST(req: Request) {
+  const userId = getUserId(req);
+  if (!userId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const createdAt = new Date();
-  try {
-    await db.insert(wardrobe_items).values({
+
+  const body = await req.json();
+  const { imageUrl } = body;
+
+  if (!imageUrl || typeof imageUrl !== "string") {
+    return NextResponse.json(
+      { error: "imageUrl required" },
+      { status: 400 }
+    );
+  }
+
+  const id = crypto.randomUUID();
+
+  const result = await db
+    .insert(wardrobe_items)
+    .values({
+      id,
       userId,
       imageUrl,
-      createdAt,
-    });
-    return NextResponse.json({ imageUrl, createdAt });
-  } catch (err) {
-    console.error(err);
-    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
-  }
+      createdAt: new Date(),
+    })
+    .returning();
+
+  return NextResponse.json(result[0]);
 }
