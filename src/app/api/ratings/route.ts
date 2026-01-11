@@ -1,37 +1,51 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { ratings } from "@/lib/schema";
+import jwt from "jsonwebtoken";
+
+const SECRET = process.env.NEXTAUTH_SECRET || "secret";
+
+function getUserId(req: Request): string | null {
+  const auth = req.headers.get("authorization");
+  if (!auth) return null;
+
+  const token = auth.split(" ")[1];
+  try {
+    const decoded = jwt.verify(token, SECRET) as any;
+    return decoded.userId as string;
+  } catch {
+    return null;
+  }
+}
 
 export async function POST(req: Request) {
-  try {
-    const { outfitId, rating, userId } = await req.json();
+  const userId = getUserId(req);
+  if (!userId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
 
-    if (!outfitId || rating == null || !userId) {
-      return NextResponse.json(
-        { error: "outfitId, rating, and userId are required" },
-        { status: 400 }
-      );
-    }
+  const body = await req.json();
+  const { outfitId, rating } = body;
 
-    const id = crypto.randomUUID();
-
-    const result = await db
-      .insert(ratings)
-      .values({
-        id,
-        outfitId,
-        rating,
-        userId,
-        createdAt: Date.now(),
-      })
-      .returning();
-
-    return NextResponse.json(result[0]);
-  } catch (error) {
-    console.error(error);
+  if (!outfitId || typeof rating !== "number") {
     return NextResponse.json(
-      { error: "Failed to save rating" },
-      { status: 500 }
+      { error: "outfitId and rating required" },
+      { status: 400 }
     );
   }
+
+  const id = crypto.randomUUID();
+
+  const result = await db
+    .insert(ratings)
+    .values({
+      id,
+      userId,
+      outfitId,
+      rating,
+      createdAt: new Date(),
+    })
+    .returning();
+
+  return NextResponse.json(result[0]);
 }
