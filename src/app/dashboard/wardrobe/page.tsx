@@ -269,60 +269,110 @@ export default function WardrobePage() {
   }
 
   return (
-    <div style={{ padding: "24px" }}>
-      <h1>Wardrobe</h1>
-      <div style={{ marginTop: "16px" }}>
-        <button onClick={handleUploadClick} disabled={loading}>
+    <div className="p-6">
+      <h1 className="text-3xl font-semibold mb-4">Your Wardrobe</h1>
+      <div className="flex flex-col sm:flex-row gap-3">
+        <button
+          onClick={handleUploadClick}
+          disabled={loading}
+          className="border rounded-md px-4 py-2 hover:bg-gray-100 disabled:opacity-50 w-full sm:w-auto"
+        >
           Upload New Item
         </button>
-        <button onClick={handleChooseFromLibrary} style={{ marginLeft: "12px" }} disabled={loading}>
+        <button
+          onClick={handleChooseFromLibrary}
+          disabled={loading}
+          className="border rounded-md px-4 py-2 hover:bg-gray-100 disabled:opacity-50 w-full sm:w-auto"
+        >
           Choose from Library
         </button>
-        <button onClick={handleGenerateOutfit} style={{ marginLeft: "12px" }} disabled={loading || generateLoading || items.length < 2}>
+        <button
+          onClick={handleGenerateOutfit}
+          disabled={loading || generateLoading || items.length < 2}
+          className="border rounded-md px-4 py-2 hover:bg-gray-100 disabled:opacity-50 w-full sm:w-auto"
+        >
           {generateLoading ? "Generating..." : "Generate Outfit"}
         </button>
       </div>
-      <input ref={fileInputRef} type="file" accept="image/*" onChange={handleFileChange} style={{ display: "none" }} />
-      {status && <p style={{ marginTop: "16px" }}>{status}</p>}
-      <div style={{ marginTop: "24px" }}>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        onChange={handleFileChange}
+        className="hidden"
+      />
+      {status && <p className="mt-4 text-sm text-gray-600">{status}</p>}
+      <div className="mt-6">
         {items.length > 0 ? (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))", gap: "12px" }}>
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
             {items.map((item) => (
-              <div key={item.id}>
-                <img src={item.imageUrl} alt="Wardrobe item" style={{ width: "100%", borderRadius: "8px" }} />
-                <button onClick={() => handleDelete(item.id)} style={{ marginTop: "4px" }}>
-                  Delete
-                </button>
+              <div
+                key={item.id}
+                className="bg-white rounded-lg shadow-sm overflow-hidden flex flex-col"
+              >
+                <img
+                  src={item.imageUrl}
+                  alt="Wardrobe item"
+                  className="object-cover w-full h-40"
+                />
+                <div className="p-2 flex justify-end">
+                  <button
+                    onClick={() => handleDelete(item.id)}
+                    className="text-sm text-red-500 hover:text-red-600"
+                  >
+                    Delete
+                  </button>
+                </div>
               </div>
             ))}
           </div>
         ) : (
-          !status && <p>Your wardrobe is empty.</p>
+          !status && <p className="text-gray-500">Your wardrobe is empty.</p>
         )}
       </div>
       {generatedOutfit && (
-        <div style={{ marginTop: "24px" }}>
-          <h2>{generatedOutfit.name}</h2>
-          <p>{generatedOutfit.description}</p>
-          <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
-            {generatedOutfit.items.map((id) => {
-              const item = items.find((it) => it.id === id);
-              return item ? (
-                <img key={id} src={item.imageUrl} alt="Outfit item" style={{ width: "100px", borderRadius: "8px" }} />
-              ) : null;
-            })}
+        <div className="mt-8">
+          <h2 className="text-2xl font-semibold mb-2">Outfit Suggestions</h2>
+          <div className="bg-white rounded-lg shadow-sm p-4">
+            <h3 className="text-lg font-medium">{generatedOutfit.name}</h3>
+            <p className="mt-1 text-gray-700">{generatedOutfit.description}</p>
+            <div className="flex flex-wrap gap-3 mt-3">
+              {generatedOutfit.items.map((id) => {
+                const item = items.find((it) => it.id === id);
+                return item ? (
+                  <img
+                    key={id}
+                    src={item.imageUrl}
+                    alt="Outfit item"
+                    className="w-24 h-24 object-cover rounded-md"
+                  />
+                ) : null;
+              })}
+            </div>
           </div>
         </div>
       )}
-      <div style={{ marginTop: "24px" }}>
-        <h2>Outfit History</h2>
-        {outfits.map((outfit) => (
-          <div key={outfit.id} style={{ marginBottom: "12px" }}>
-            <strong>{outfit.name}</strong>
-            <p>{outfit.description}</p>
-            <button onClick={() => handleRegenerate(outfit.id)}>Regenerate</button>
-          </div>
-        ))}
+      <div className="mt-8">
+        <h2 className="text-2xl font-semibold mb-2">Outfit History</h2>
+        {outfits.length > 0 ? (
+          outfits.map((outfit) => (
+            <div
+              key={outfit.id}
+              className="bg-white rounded-lg shadow-sm p-4 mb-4"
+            >
+              <h3 className="text-lg font-medium">{outfit.name}</h3>
+              <p className="text-gray-700">{outfit.description}</p>
+              <button
+                onClick={() => handleRegenerate(outfit.id)}
+                className="mt-2 text-blue-600 hover:underline"
+              >
+                Regenerate
+              </button>
+            </div>
+          ))
+        ) : (
+          <p className="text-gray-500">No outfit history yet.</p>
+        )}
       </div>
     </div>
   );
