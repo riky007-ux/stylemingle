@@ -22,6 +22,9 @@ export const wardrobe_items = sqliteTable('wardrobe_items', {
 export const outfits = sqliteTable('outfits', {
   id: text('id').primaryKey(),
   userId: text('userId').notNull().references(() => users.id),
+  name: text('name').notNull(),
+  description: text('description').notNull(),
+  itemIds: text('itemIds').notNull(),
   createdAt: integer('createdAt', { mode: 'timestamp' }).notNull(),
 });
 
