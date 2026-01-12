@@ -1,113 +1,62 @@
-'use client';
+"use client";
 
-import React, { useEffect, useState, useRef } from 'react';
-
-const TOKEN_KEY = 'authToken';
-
-interface WardrobeItem {
-  id: string;
-  imageUrl: string;
-}
+import { useRef } from "react";
 
 export default function WardrobePage() {
-  const [items, setItems] = useState<WardrobeItem[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  const fetchItems = async () => {
-    const token = typeof window !== 'undefined' ? localStorage.getItem(TOKEN_KEY) : null;
-    if (!token) {
-      setItems([]);
-      setLoading(false);
-      return;
-    }
-    try {
-      const res = await fetch('/api/wardrobe/items', {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        const itemsList = Array.isArray(data) ? data : (data.items || []);
-        setItems(itemsList);
-      } else {
-        setItems([]);
-      }
-    } catch (error) {
-      console.error('Failed to fetch items', error);
-      setItems([]);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchItems();
-  }, []);
-
-  const handleUpload = async (file: File) => {
-    const token = typeof window !== 'undefined' ? localStorage.getItem(TOKEN_KEY) : null;
-    if (!token) return;
-    const formData = new FormData();
-    formData.append('file', file);
-    try {
-      const res = await fetch('/api/wardrobe/upload', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-        body: formData,
-      });
-      if (res.ok) {
-        await fetchItems();
-      } else {
-        console.error('Failed to upload item');
-      }
-    } catch (error) {
-      console.error('Error uploading item', error);
-    }
-  };
-
-  const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      handleUpload(file);
-    }
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
-    }
-  };
-
-  const triggerFileInput = () => {
+  function handleUploadClick() {
     fileInputRef.current?.click();
-  };
+  }
+
+  async function handleFileChange(
+    e: React.ChangeEvent<HTMLInputElement>
+  ) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    await fetch("/api/wardrobe/upload", {
+      method: "POST",
+      body: formData,
+    });
+
+    alert("Upload request sent");
+  }
+
+  async function handleChooseFromLibrary() {
+    const res = await fetch("/api/wardrobe/items");
+    const data = await res.json();
+    console.log("Wardrobe items:", data);
+    alert(`Fetched ${data.length ?? 0} items`);
+  }
 
   return (
-    <div className="wardrobe-page">
-      <h1>My Wardrobe</h1>
-      <div>
-        <button onClick={triggerFileInput}>Upload New Item</button>
-        <button onClick={fetchItems}>Choose from Library</button>
-        <input
-          type="file"
-          accept="image/*"
-          style={{ display: 'none' }}
-          ref={fileInputRef}
-          onChange={handleFileInput}
-        />
+    <div style={{ padding: "24px" }}>
+      <h1>Wardrobe</h1>
+
+      <div style={{ marginTop: "16px" }}>
+        <button onClick={handleUploadClick}>
+          Upload New Item
+        </button>
+
+        <button
+          onClick={handleChooseFromLibrary}
+          style={{ marginLeft: "12px" }}
+        >
+          Choose from Library
+        </button>
       </div>
-      {loading ? (
-        <p>Loading...</p>
-      ) : items.length === 0 ? (
-        <p>No items found.</p>
-      ) : (
-        <div className="wardrobe-grid">
-          {items.map((item) => (
-            <img key={item.id} src={item.imageUrl} alt="Wardrobe Item" />
-          ))}
-        </div>
-      )}
+
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        onChange={handleFileChange}
+        style={{ display: "none" }}
+      />
     </div>
   );
 }
