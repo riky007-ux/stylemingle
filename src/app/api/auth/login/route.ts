@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import jwt from "jsonwebtoken";
+import bcrypt from "bcryptjs";
 import { db } from "@/lib/db";
 import { users } from "@/lib/schema";
 import { eq } from "drizzle-orm";
@@ -8,33 +9,27 @@ const SECRET = process.env.NEXTAUTH_SECRET || "secret";
 
 export async function POST(request: Request) {
   try {
-    const { email } = await request.json();
+    const { email, password } = await request.json();
 
-    if (!email || typeof email !== "string") {
-      return NextResponse.json({ error: "Email required" }, { status: 400 });
+    if (!email || typeof email !== "string" || !password || typeof password !== "string") {
+      return NextResponse.json({ error: "Email and password required" }, { status: 400 });
     }
 
-    // Ensure user exists
-    const existing = await db
-      .select()
-      .from(users)
-      .where(eq(users.email, email))
-      .limit(1);
+    // lookup user
+    const existing = await db.select().from(users).where(eq(users.email, email)).limit(1);
 
-    let userId: string;
-
-    if (existing.length > 0) {
-      userId = existing[0].id;
-    } else {
-      userId = crypto.randomUUID();
-      await db.insert(users).values({
-        id: userId,
-        email,
-        createdAt: new Date(),
-      });
+    if (existing.length === 0) {
+      return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
     }
 
-    const token = jwt.sign({ userId }, SECRET, { expiresIn: "7d" });
+    const user = existing[0] as any;
+    const passwordMatch = await bcrypt.compare(password, user.passwordHash);
+
+    if (!passwordMatch) {
+      return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
+    }
+
+    const token = jwt.sign({ userId: user.id }, SECRET, { expiresIn: "7d" });
 
     return NextResponse.json({ token });
   } catch (err) {
