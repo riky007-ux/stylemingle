@@ -1,5 +1,4 @@
 "use client";
-
 import { useRef, useState } from "react";
 
 type WardrobeItem = {
@@ -26,7 +25,11 @@ function fileToDataUrl(file: File): Promise<string> {
   });
 }
 
-async function compressImage(file: File, maxWidth = 1024, quality = 0.75): Promise<File> {
+async function compressImage(
+  file: File,
+  maxWidth = 1024,
+  quality = 0.75
+): Promise<File> {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => {
@@ -45,14 +48,18 @@ async function compressImage(file: File, maxWidth = 1024, quality = 0.75): Promi
         return;
       }
       ctx.drawImage(img, 0, 0, width, height);
-      canvas.toBlob((blob) => {
-        if (!blob) {
-          reject(new Error("Image compression failed"));
-          return;
-        }
-        const compressedFile = new File([blob], file.name, { type: blob.type });
-        resolve(compressedFile);
-      }, "image/jpeg", quality);
+      canvas.toBlob(
+        (blob) => {
+          if (!blob) {
+            reject(new Error("Image compression failed"));
+            return;
+          }
+          const compressedFile = new File([blob], file.name, { type: blob.type });
+          resolve(compressedFile);
+        },
+        "image/jpeg",
+        quality
+      );
     };
     img.onerror = (err) => reject(err);
     img.src = URL.createObjectURL(file);
@@ -64,6 +71,12 @@ export default function WardrobePage() {
   const [items, setItems] = useState<WardrobeItem[]>([]);
   const [status, setStatus] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  // New states for outfit generation
+  const [generatedOutfit, setGeneratedOutfit] = useState<
+    | { name: string; description: string; items: string[] }
+    | null
+  >(null);
+  const [generateLoading, setGenerateLoading] = useState(false);
 
   function handleUploadClick() {
     fileInputRef.current?.click();
@@ -72,21 +85,17 @@ export default function WardrobePage() {
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-
     const token = getAuthToken();
     if (!token) {
       setStatus("Not authenticated (missing token). Please log in again.");
       return;
     }
-
     setStatus("Uploading...");
     setLoading(true);
-
     try {
       const compressedFile = await compressImage(file);
       const formData = new FormData();
       formData.append("file", compressedFile);
-
       const res = await fetch("/api/wardrobe/upload", {
         method: "POST",
         headers: {
@@ -94,12 +103,10 @@ export default function WardrobePage() {
         },
         body: formData,
       });
-
       if (!res.ok) {
         const text = await res.text().catch(() => "");
         throw new Error(`Upload failed (${res.status}) ${text}`);
       }
-
       setStatus("Upload successful");
       await handleChooseFromLibrary();
     } catch (err: any) {
@@ -116,22 +123,18 @@ export default function WardrobePage() {
       setStatus("Not authenticated (missing token). Please log in again.");
       return;
     }
-
     setLoading(true);
     setStatus("Loading wardrobe...");
-
     try {
       const res = await fetch("/api/wardrobe/items", {
         headers: {
           Authorization: `Bearer ${token}`,
         },
       });
-
       if (!res.ok) {
         const text = await res.text().catch(() => "");
         throw new Error(`Failed to load wardrobe (${res.status}) ${text}`);
       }
-
       const data = await res.json();
       setItems(Array.isArray(data) ? data : []);
       setStatus(data?.length ? null : "No items yet");
@@ -169,15 +172,46 @@ export default function WardrobePage() {
     }
   }
 
+  // New function to generate outfit
+  async function handleGenerateOutfit() {
+    const token = getAuthToken();
+    if (!token) {
+      setStatus("Not authenticated (missing token). Please log in again.");
+      return;
+    }
+    if (items.length < 2) {
+      setStatus("Not enough items in wardrobe to generate an outfit.");
+      return;
+    }
+    setGenerateLoading(true);
+    setStatus("Generating outfit...");
+    try {
+      const res = await fetch("/api/outfits/generate", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data?.message || "Failed to generate outfit");
+      }
+      setGeneratedOutfit(data);
+      setStatus(null);
+    } catch (err: any) {
+      setStatus(err?.message || "Failed to generate outfit");
+    } finally {
+      setGenerateLoading(false);
+    }
+  }
+
   return (
     <div style={{ padding: "24px" }}>
       <h1>Wardrobe</h1>
-
       <div style={{ marginTop: "16px" }}>
         <button onClick={handleUploadClick} disabled={loading}>
           Upload New Item
         </button>
-
         <button
           onClick={handleChooseFromLibrary}
           style={{ marginLeft: "12px" }}
@@ -185,8 +219,14 @@ export default function WardrobePage() {
         >
           Choose from Library
         </button>
+        <button
+          onClick={handleGenerateOutfit}
+          style={{ marginLeft: "12px" }}
+          disabled={loading || generateLoading || items.length < 2}
+        >
+          {generateLoading ? "Generating..." : "Generate Outfit"}
+        </button>
       </div>
-
       <input
         ref={fileInputRef}
         type="file"
@@ -194,9 +234,7 @@ export default function WardrobePage() {
         onChange={handleFileChange}
         style={{ display: "none" }}
       />
-
       {status && <p style={{ marginTop: "16px" }}>{status}</p>}
-
       <div style={{ marginTop: "24px" }}>
         {items.length > 0 ? (
           <div
@@ -226,6 +264,27 @@ export default function WardrobePage() {
           !status && <p>Your wardrobe is empty.</p>
         )}
       </div>
+      {generatedOutfit && (
+        <div style={{ marginTop: "24px" }}>
+          <h2>{generatedOutfit.name}</h2>
+          <p>{generatedOutfit.description}</p>
+          <div
+            style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}
+          >
+            {generatedOutfit.items.map((id) => {
+              const item = items.find((it) => it.id === id);
+              return item ? (
+                <img
+                  key={id}
+                  src={item.imageUrl}
+                  alt="Outfit item"
+                  style={{ width: "120px", borderRadius: "8px" }}
+                />
+              ) : null;
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
