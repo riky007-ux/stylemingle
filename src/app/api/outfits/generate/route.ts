@@ -107,4 +107,4 @@ export async function POST(request: NextRequest) {
   }
 }
 
-export const runtime = 'edge';
+xeport const runtime = 'nodejs';
