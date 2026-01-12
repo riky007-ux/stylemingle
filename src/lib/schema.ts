@@ -11,6 +11,11 @@ export const wardrobe_items = sqliteTable('wardrobe_items', {
   id: text('id').primaryKey(),
   userId: text('userId').notNull().references(() => users.id),
   imageUrl: text('imageUrl').notNull(),
+  category: text('category'),
+  color: text('color'),
+  style: text('style'),
+  season: text('season'),
+  notes: text('notes'),
   createdAt: integer('createdAt', { mode: 'timestamp' }).notNull(),
 });
 
