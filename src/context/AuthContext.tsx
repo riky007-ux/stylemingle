@@ -1,5 +1,12 @@
 "use client";
-import React, { createContext, useContext, useState, useEffect, ReactNode } from "react";
+
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  ReactNode,
+} from "react";
 
 interface AuthContextValue {
   isAuthenticated: boolean;
@@ -14,17 +21,26 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   useEffect(() => {
     if (typeof window !== "undefined") {
-      const token = localStorage.getItem("authToken");
+      const token =
+        localStorage.getItem("token") ||
+        localStorage.getItem("authToken");
+
       setIsAuthenticated(!!token);
     }
   }, []);
 
   const login = (token: string) => {
+    // Canonical token key (used by API calls)
+    localStorage.setItem("token", token);
+
+    // Backward compatibility (existing logic)
     localStorage.setItem("authToken", token);
+
     setIsAuthenticated(true);
   };
 
   const logout = () => {
+    localStorage.removeItem("token");
     localStorage.removeItem("authToken");
     setIsAuthenticated(false);
   };
