@@ -107,4 +107,4 @@ export async function POST(request: NextRequest) {
   }
 }
 
-xeport const runtime = 'nodejs';
+export const runtime = 'nodejs';
