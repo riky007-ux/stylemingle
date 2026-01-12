@@ -9,8 +9,6 @@ type WardrobeItem = {
 
 function getAuthToken(): string | null {
   if (typeof window === "undefined") return null;
-
-  // Try the most common keys (your auth context likely stores one of these)
   return (
     window.localStorage.getItem("token") ||
     window.localStorage.getItem("authToken") ||
@@ -25,6 +23,39 @@ function fileToDataUrl(file: File): Promise<string> {
     reader.onerror = () => reject(new Error("Failed to read file"));
     reader.onload = () => resolve(String(reader.result));
     reader.readAsDataURL(file);
+  });
+}
+
+async function compressImage(file: File, maxWidth = 1024, quality = 0.75): Promise<File> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      let width = img.width;
+      let height = img.height;
+      if (width > maxWidth) {
+        height = Math.round(height * (maxWidth / width));
+        width = maxWidth;
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        reject(new Error("Canvas context is not available"));
+        return;
+      }
+      ctx.drawImage(img, 0, 0, width, height);
+      canvas.toBlob((blob) => {
+        if (!blob) {
+          reject(new Error("Image compression failed"));
+          return;
+        }
+        const compressedFile = new File([blob], file.name, { type: blob.type });
+        resolve(compressedFile);
+      }, "image/jpeg", quality);
+    };
+    img.onerror = (err) => reject(err);
+    img.src = URL.createObjectURL(file);
   });
 }
 
@@ -52,16 +83,16 @@ export default function WardrobePage() {
     setLoading(true);
 
     try {
-      // Convert image to data URL so backend can store it in imageUrl
-      const imageUrl = await fileToDataUrl(file);
+      const compressedFile = await compressImage(file);
+      const formData = new FormData();
+      formData.append("file", compressedFile);
 
       const res = await fetch("/api/wardrobe/upload", {
         method: "POST",
         headers: {
-          "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ imageUrl }),
+        body: formData,
       });
 
       if (!res.ok) {
@@ -75,7 +106,6 @@ export default function WardrobePage() {
       setStatus(err?.message || "Upload failed");
     } finally {
       setLoading(false);
-      // Reset input so selecting the same file again triggers onChange
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
   }
