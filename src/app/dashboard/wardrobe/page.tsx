@@ -142,6 +142,33 @@ export default function WardrobePage() {
     }
   }
 
+  async function handleDelete(itemId: string) {
+    const token = getAuthToken();
+    if (!token) {
+      setStatus("Not authenticated (missing token). Please log in again.");
+      return;
+    }
+    const confirmDelete = window.confirm("Are you sure you want to delete this item?");
+    if (!confirmDelete) {
+      return;
+    }
+    try {
+      const res = await fetch(`/api/wardrobe/items/${itemId}`, {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(`Failed to delete item (${res.status}) ${text}`);
+      }
+      setItems((prev) => prev.filter((it) => it.id !== itemId));
+    } catch (err: any) {
+      setStatus(err?.message || "Failed to delete item");
+    }
+  }
+
   return (
     <div style={{ padding: "24px" }}>
       <h1>Wardrobe</h1>
@@ -180,12 +207,19 @@ export default function WardrobePage() {
             }}
           >
             {items.map((item) => (
-              <img
-                key={item.id}
-                src={item.imageUrl}
-                alt="Wardrobe item"
-                style={{ width: "100%", borderRadius: "8px" }}
-              />
+              <div key={item.id}>
+                <img
+                  src={item.imageUrl}
+                  alt="Wardrobe item"
+                  style={{ width: "100%", borderRadius: "8px" }}
+                />
+                <button
+                  onClick={() => handleDelete(item.id)}
+                  style={{ marginTop: "4px" }}
+                >
+                  Delete
+                </button>
+              </div>
             ))}
           </div>
         ) : (
