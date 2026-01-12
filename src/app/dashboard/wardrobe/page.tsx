@@ -1,9 +1,17 @@
 "use client";
-import { useRef, useState } from "react";
+import { useRef, useState, useEffect } from "react";
 
 type WardrobeItem = {
   id: string;
   imageUrl: string;
+};
+
+type Outfit = {
+  id: string;
+  name: string;
+  description: string;
+  itemIds: string[];
+  createdAt: number;
 };
 
 function getAuthToken(): string | null {
@@ -71,12 +79,37 @@ export default function WardrobePage() {
   const [items, setItems] = useState<WardrobeItem[]>([]);
   const [status, setStatus] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  // New states for outfit generation
-  const [generatedOutfit, setGeneratedOutfit] = useState<
-    | { name: string; description: string; items: string[] }
-    | null
-  >(null);
+
+  // state for generated outfit
+  const [generatedOutfit, setGeneratedOutfit] = useState<{ name: string; description: string; items: string[] } | null>(null);
   const [generateLoading, setGenerateLoading] = useState(false);
+
+  // outfit history
+  const [outfits, setOutfits] = useState<Outfit[]>([]);
+
+  // fetch outfits on mount
+  useEffect(() => {
+    async function fetchOutfits() {
+      const token = getAuthToken();
+      if (!token) return;
+      try {
+        const res = await fetch("/api/outfits", {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data)) {
+            setOutfits(data);
+          }
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    }
+    fetchOutfits();
+  }, []);
 
   function handleUploadClick() {
     fileInputRef.current?.click();
@@ -172,7 +205,6 @@ export default function WardrobePage() {
     }
   }
 
-  // New function to generate outfit
   async function handleGenerateOutfit() {
     const token = getAuthToken();
     if (!token) {
@@ -198,10 +230,41 @@ export default function WardrobePage() {
       }
       setGeneratedOutfit(data);
       setStatus(null);
+      // append to history
+      setOutfits((prev) => [data, ...prev]);
     } catch (err: any) {
       setStatus(err?.message || "Failed to generate outfit");
     } finally {
       setGenerateLoading(false);
+    }
+  }
+
+  async function handleRegenerate(outfitId: string) {
+    const token = getAuthToken();
+    if (!token) {
+      setStatus("Not authenticated (missing token). Please log in again.");
+      return;
+    }
+    const instruction = window.prompt("Enter any additional instructions (optional):", "") || "";
+    try {
+      const res = await fetch("/api/outfits/regenerate", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ outfitId, instruction }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data?.message || "Failed to regenerate outfit");
+      }
+      // update history
+      setOutfits((prev) => [data, ...prev]);
+      setGeneratedOutfit(data);
+      setStatus(null);
+    } catch (err: any) {
+      setStatus(err?.message || "Failed to regenerate outfit");
     }
   }
 
@@ -212,49 +275,22 @@ export default function WardrobePage() {
         <button onClick={handleUploadClick} disabled={loading}>
           Upload New Item
         </button>
-        <button
-          onClick={handleChooseFromLibrary}
-          style={{ marginLeft: "12px" }}
-          disabled={loading}
-        >
+        <button onClick={handleChooseFromLibrary} style={{ marginLeft: "12px" }} disabled={loading}>
           Choose from Library
         </button>
-        <button
-          onClick={handleGenerateOutfit}
-          style={{ marginLeft: "12px" }}
-          disabled={loading || generateLoading || items.length < 2}
-        >
+        <button onClick={handleGenerateOutfit} style={{ marginLeft: "12px" }} disabled={loading || generateLoading || items.length < 2}>
           {generateLoading ? "Generating..." : "Generate Outfit"}
         </button>
       </div>
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="image/*"
-        onChange={handleFileChange}
-        style={{ display: "none" }}
-      />
+      <input ref={fileInputRef} type="file" accept="image/*" onChange={handleFileChange} style={{ display: "none" }} />
       {status && <p style={{ marginTop: "16px" }}>{status}</p>}
       <div style={{ marginTop: "24px" }}>
         {items.length > 0 ? (
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))",
-              gap: "12px",
-            }}
-          >
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))", gap: "12px" }}>
             {items.map((item) => (
               <div key={item.id}>
-                <img
-                  src={item.imageUrl}
-                  alt="Wardrobe item"
-                  style={{ width: "100%", borderRadius: "8px" }}
-                />
-                <button
-                  onClick={() => handleDelete(item.id)}
-                  style={{ marginTop: "4px" }}
-                >
+                <img src={item.imageUrl} alt="Wardrobe item" style={{ width: "100%", borderRadius: "8px" }} />
+                <button onClick={() => handleDelete(item.id)} style={{ marginTop: "4px" }}>
                   Delete
                 </button>
               </div>
@@ -268,23 +304,26 @@ export default function WardrobePage() {
         <div style={{ marginTop: "24px" }}>
           <h2>{generatedOutfit.name}</h2>
           <p>{generatedOutfit.description}</p>
-          <div
-            style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}
-          >
+          <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
             {generatedOutfit.items.map((id) => {
               const item = items.find((it) => it.id === id);
               return item ? (
-                <img
-                  key={id}
-                  src={item.imageUrl}
-                  alt="Outfit item"
-                  style={{ width: "120px", borderRadius: "8px" }}
-                />
+                <img key={id} src={item.imageUrl} alt="Outfit item" style={{ width: "100px", borderRadius: "8px" }} />
               ) : null;
             })}
           </div>
         </div>
       )}
+      <div style={{ marginTop: "24px" }}>
+        <h2>Outfit History</h2>
+        {outfits.map((outfit) => (
+          <div key={outfit.id} style={{ marginBottom: "12px" }}>
+            <strong>{outfit.name}</strong>
+            <p>{outfit.description}</p>
+            <button onClick={() => handleRegenerate(outfit.id)}>Regenerate</button>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
