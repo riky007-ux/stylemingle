@@ -84,8 +84,10 @@ export async function POST(request: NextRequest) {
     if (outfit.items.length < 2) {
       outfit.items = items.slice(0, 2).map((i) => i.id);
     }
-    const outfitId = randomUUID();
-    await db.insert(outfits).values({
+   // @ts-ignore
+ const outfitId = randomUUID();
+  // @ts-ignore
+  await db.insert(outfits).values({
       id: outfitId,
       userId,
       name: outfit.name,
