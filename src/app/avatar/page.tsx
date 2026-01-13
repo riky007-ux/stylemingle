@@ -1,6 +1,6 @@
-'use client';
+"use client";
 
-import Avatar from '@/components/avatar/Avatar';
+import Avatar from "@/components/avatar/Avatar";
 
 export default function AvatarPage() {
   return (
@@ -8,10 +8,10 @@ export default function AvatarPage() {
       <Avatar
         size="M"
         expression="soft-smile"
-        outfit={{ top: 'tshirt-basic', bottom: 'jeans-basic' }}
         hair="short"
         headShape="oval"
         skinTone="medium"
+        outfit="casual-basic"
       />
     </div>
   );
