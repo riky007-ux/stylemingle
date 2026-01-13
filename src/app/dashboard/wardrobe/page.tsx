@@ -62,7 +62,9 @@ async function compressImage(
             reject(new Error("Image compression failed"));
             return;
           }
-          const compressedFile = new File([blob], file.name, { type: blob.type });
+          const compressedFile = new File([blob], file.name, {
+            type: blob.type,
+          });
           resolve(compressedFile);
         },
         "image/jpeg",
@@ -79,11 +81,10 @@ export default function WardrobePage() {
   const [items, setItems] = useState<WardrobeItem[]>([]);
   const [status, setStatus] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-
   // state for generated outfit
-  const [generatedOutfit, setGeneratedOutfit] = useState<{ name: string; description: string; items: string[] } | null>(null);
+  const [generatedOutfit, setGeneratedOutfit] =
+    useState<{ name: string; description: string; items: string[] } | null>(null);
   const [generateLoading, setGenerateLoading] = useState(false);
-
   // outfit history
   const [outfits, setOutfits] = useState<Outfit[]>([]);
 
@@ -94,9 +95,7 @@ export default function WardrobePage() {
       if (!token) return;
       try {
         const res = await fetch("/api/outfits", {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
+          headers: { Authorization: `Bearer ${token}` },
         });
         if (res.ok) {
           const data = await res.json();
@@ -131,9 +130,7 @@ export default function WardrobePage() {
       formData.append("file", compressedFile);
       const res = await fetch("/api/wardrobe/upload", {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { Authorization: `Bearer ${token}` },
         body: formData,
       });
       if (!res.ok) {
@@ -160,9 +157,7 @@ export default function WardrobePage() {
     setStatus("Loading wardrobe...");
     try {
       const res = await fetch("/api/wardrobe/items", {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) {
         const text = await res.text().catch(() => "");
@@ -184,16 +179,16 @@ export default function WardrobePage() {
       setStatus("Not authenticated (missing token). Please log in again.");
       return;
     }
-    const confirmDelete = window.confirm("Are you sure you want to delete this item?");
+    const confirmDelete = window.confirm(
+      "Are you sure you want to delete this item?"
+    );
     if (!confirmDelete) {
       return;
     }
     try {
       const res = await fetch(`/api/wardrobe/items/${itemId}`, {
         method: "DELETE",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) {
         const text = await res.text().catch(() => "");
@@ -220,9 +215,7 @@ export default function WardrobePage() {
     try {
       const res = await fetch("/api/outfits/generate", {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
       if (!res.ok) {
@@ -230,7 +223,6 @@ export default function WardrobePage() {
       }
       setGeneratedOutfit(data);
       setStatus(null);
-      // append to history
       setOutfits((prev) => [data, ...prev]);
     } catch (err: any) {
       setStatus(err?.message || "Failed to generate outfit");
@@ -245,7 +237,8 @@ export default function WardrobePage() {
       setStatus("Not authenticated (missing token). Please log in again.");
       return;
     }
-    const instruction = window.prompt("Enter any additional instructions (optional):", "") || "";
+    const instruction =
+      window.prompt("Enter any additional instructions (optional):", "") || "";
     try {
       const res = await fetch("/api/outfits/regenerate", {
         method: "POST",
@@ -259,7 +252,6 @@ export default function WardrobePage() {
       if (!res.ok) {
         throw new Error(data?.message || "Failed to regenerate outfit");
       }
-      // update history
       setOutfits((prev) => [data, ...prev]);
       setGeneratedOutfit(data);
       setStatus(null);
@@ -269,29 +261,22 @@ export default function WardrobePage() {
   }
 
   return (
-    <div className="p-6">
-      <h1 className="text-3xl font-semibold mb-4">Your Wardrobe</h1>
-      <div className="flex flex-col sm:flex-row gap-3">
+    <div className="p-6 md:p-8">
+      <h1 className="text-3xl font-semibold mb-6">Your Wardrobe</h1>
+      <div className="flex flex-col sm:flex-row gap-3 mb-6">
         <button
           onClick={handleUploadClick}
           disabled={loading}
-          className="border rounded-md px-4 py-2 hover:bg-gray-100 disabled:opacity-50 w-full sm:w-auto"
+          className="border rounded-md px-4 py-3 hover:bg-gray-100 disabled:opacity-50 w-full sm:w-auto"
         >
           Upload New Item
         </button>
         <button
           onClick={handleChooseFromLibrary}
           disabled={loading}
-          className="border rounded-md px-4 py-2 hover:bg-gray-100 disabled:opacity-50 w-full sm:w-auto"
+          className="border rounded-md px-4 py-3 hover:bg-gray-100 disabled:opacity-50 w-full sm:w-auto"
         >
           Choose from Library
-        </button>
-        <button
-          onClick={handleGenerateOutfit}
-          disabled={loading || generateLoading || items.length < 2}
-          className="border rounded-md px-4 py-2 hover:bg-gray-100 disabled:opacity-50 w-full sm:w-auto"
-        >
-          {generateLoading ? "Generating..." : "Generate Outfit"}
         </button>
       </div>
       <input
@@ -304,7 +289,7 @@ export default function WardrobePage() {
       {status && <p className="mt-4 text-sm text-gray-600">{status}</p>}
       <div className="mt-6">
         {items.length > 0 ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
             {items.map((item) => (
               <div
                 key={item.id}
@@ -315,7 +300,7 @@ export default function WardrobePage() {
                   alt="Wardrobe item"
                   className="object-cover w-full h-40"
                 />
-                <div className="p-2 flex justify-end">
+                <div className="p-3 flex justify-end">
                   <button
                     onClick={() => handleDelete(item.id)}
                     className="text-sm text-red-500 hover:text-red-600"
@@ -327,13 +312,24 @@ export default function WardrobePage() {
             ))}
           </div>
         ) : (
-          !status && <p className="text-gray-500">Your wardrobe is empty.</p>
+          !status && (
+            <p className="text-gray-500">
+              Your wardrobe is empty. Start by uploading your first item.
+            </p>
+          )
         )}
       </div>
-      {generatedOutfit && (
-        <div className="mt-8">
-          <h2 className="text-2xl font-semibold mb-2">Outfit Suggestions</h2>
-          <div className="bg-white rounded-lg shadow-sm p-4">
+      <div className="mt-8">
+        <h2 className="text-2xl font-semibold mb-3">Generate Outfit</h2>
+        <button
+          onClick={handleGenerateOutfit}
+          disabled={loading || generateLoading || items.length < 2}
+          className="border rounded-md px-4 py-3 hover:bg-gray-100 disabled:opacity-50"
+        >
+          {generateLoading ? "Generating..." : "Generate Outfit"}
+        </button>
+        {generatedOutfit && (
+          <div className="mt-6 bg-white rounded-lg shadow-sm p-6">
             <h3 className="text-lg font-medium">{generatedOutfit.name}</h3>
             <p className="mt-1 text-gray-700">{generatedOutfit.description}</p>
             <div className="flex flex-wrap gap-3 mt-3">
@@ -350,10 +346,10 @@ export default function WardrobePage() {
               })}
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
       <div className="mt-8">
-        <h2 className="text-2xl font-semibold mb-2">Outfit History</h2>
+        <h2 className="text-2xl font-semibold mb-3">Outfit History</h2>
         {outfits.length > 0 ? (
           outfits.map((outfit) => (
             <div
@@ -371,7 +367,9 @@ export default function WardrobePage() {
             </div>
           ))
         ) : (
-          <p className="text-gray-500">No outfit history yet.</p>
+          <p className="text-gray-500">
+            No outfits yet. Generate an outfit to get started.
+          </p>
         )}
       </div>
     </div>
