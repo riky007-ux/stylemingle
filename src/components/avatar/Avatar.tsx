@@ -42,8 +42,8 @@ export const Avatar: React.FC<AvatarProps> = ({
 }) => {
   const scale = sizeScale[size] ?? 1;
   const skin = avatarSkinTones[skinTone ?? "default"];
-  const topElement = outfit?.top ? avatarTops[outfit.top] : null;
-  const bottomElement = outfit?.bottom ? avatarBottoms[outfit.bottom] : null;
+  const topElement = outfit?.top ? avatarTops[outfit.top]?.[size] : null;
+  const bottomElement = outfit?.bottom ? avatarBottoms[outfit.bottom]?.[size] : null;
   const hairElement = hair ? avatarHair[hair] : null;
   const expressionElement = expression ? avatarExpressions[expression] : null;
 
@@ -58,25 +58,18 @@ export const Avatar: React.FC<AvatarProps> = ({
         {/* legs */}
         <rect x={75} y={190} width={25} height={75} rx={6} fill={skin} />
         <rect x={100} y={190} width={25} height={75} rx={6} fill={skin} />
-
         {/* pants overlay legs */}
         {bottomElement}
-
         {/* torso */}
         <rect x={60} y={110} width={80} height={90} rx={20} fill={skin} />
-
         {/* top overlay torso but under head */}
         {topElement}
-
         {/* neck */}
         <rect x={90} y={90} width={20} height={25} rx={6} fill={skin} />
-
         {/* head */}
         <circle cx={100} cy={60} r={30} fill={skin} />
-
         {/* hair */}
         {hairElement}
-
         {/* facial features */}
         {expressionElement}
       </g>
