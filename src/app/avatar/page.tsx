@@ -1,6 +1,6 @@
 "use client";
 
-import Avatar from "@/components/avatar/Avatar";
+import { Avatar } from "@/components/avatar/Avatar";
 
 export default function AvatarPage() {
   return (
