@@ -1,8 +1,8 @@
 'use client';
 import React from 'react';
+import { avatarExpressions, AvatarExpression } from './avatarExpressions';
 
 export type AvatarSize = 'S' | 'M' | 'L' | 'XL';
-export type AvatarExpression = 'neutral' | 'soft-smile';
 
 interface AvatarProps {
   size?: AvatarSize;
@@ -16,22 +16,9 @@ const sizeDimensions: Record<AvatarSize, { torsoWidth: number; hipWidth: number;
   XL: { torsoWidth: 70, hipWidth: 70, shoulderWidth: 70 },
 };
 
-const expressionVariants: Record<AvatarExpression, { mouth: string; leftBrow: string; rightBrow: string }> = {
-  neutral: {
-    mouth: 'M90 65 Q100 67 110 65',
-    leftBrow: 'M84 38 Q90 36 96 38',
-    rightBrow: 'M104 38 Q110 36 116 38',
-  },
-  'soft-smile': {
-    mouth: 'M90 65 Q100 70 110 65',
-    leftBrow: 'M84 37 Q90 35 96 37',
-    rightBrow: 'M104 37 Q110 35 116 37',
-  },
-};
-
 const Avatar: React.FC<AvatarProps> = ({ size = 'M', expression = 'neutral' }) => {
   const dims = sizeDimensions[size];
-  const variant = expressionVariants[expression] ?? expressionVariants.neutral;
+  const variant = avatarExpressions[expression] ?? avatarExpressions.neutral;
   const shoulderX = (200 - dims.shoulderWidth) / 2;
   const torsoX = (200 - dims.torsoWidth) / 2;
   const hipX = (200 - dims.hipWidth) / 2;
