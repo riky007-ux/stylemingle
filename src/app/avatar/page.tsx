@@ -10,28 +10,7 @@ export default function AvatarPage() {
         expression="soft-smile"
         hair="short"
         skinTone="medium"
-        outfit={{
-          top: (
-            <rect
-              x={60}
-              y={180}
-              width={80}
-              height={80}
-              rx={20}
-              fill="#4f7cff"
-            />
-          ),
-          bottom: (
-            <rect
-              x={60}
-              y={260}
-              width={80}
-              height={140}
-              rx={20}
-              fill="#2d2d2d"
-            />
-          ),
-        }}
+        outfit={{ top: "tshirt-basic", bottom: "jeans-basic" }}
       />
     </div>
   );
