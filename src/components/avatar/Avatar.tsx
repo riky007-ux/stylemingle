@@ -47,6 +47,9 @@ export const Avatar: React.FC<AvatarProps> = ({
   const hairElement = hair ? avatarHair[hair]?.[size] : null;
   const expressionParts = expression ? avatarExpressions[expression] : null;
 
+  // define a neutral shadow color
+  const shadowColor = "rgba(0, 0, 0, 0.12)";
+
   return (
     <svg
       width={200 * scale}
@@ -56,18 +59,22 @@ export const Avatar: React.FC<AvatarProps> = ({
     >
       <g transform={`scale(${scale})`}>
         {/* legs */}
-        <rect x={75} y={190} width={25} height={75} rx={6} fill={skin} />
-        <rect x={100} y={190} width={25} height={75} rx={6} fill={skin} />
+        <rect x={75} y={190} width={25} height={75} rx={6} fill={skin} stroke="black" strokeOpacity={0.05} />
+        <rect x={100} y={190} width={25} height={75} rx={6} fill={skin} stroke="black" strokeOpacity={0.05} />
         {/* pants overlay legs */}
         {bottomElement}
+        {/* subtle shadow where torso meets pants */}
+        <rect x={60} y={185} width={80} height={10} rx={8} fill={shadowColor} />
         {/* torso */}
-        <rect x={60} y={110} width={80} height={90} rx={20} fill={skin} />
+        <rect x={60} y={110} width={80} height={90} rx={20} fill={skin} stroke="black" strokeOpacity={0.05} />
         {/* top overlay torso but under head */}
         {topElement}
+        {/* subtle shadow under collar/neck */}
+        <ellipse cx={100} cy={105} rx={28} ry={8} fill={shadowColor} />
         {/* neck */}
-        <rect x={90} y={90} width={20} height={25} rx={6} fill={skin} />
+        <rect x={90} y={90} width={20} height={25} rx={6} fill={skin} stroke="black" strokeOpacity={0.05} />
         {/* head */}
-        <circle cx={100} cy={60} r={30} fill={skin} />
+        <circle cx={100} cy={60} r={30} fill={skin} stroke="black" strokeOpacity={0.05} />
         {/* hair */}
         {hairElement}
         {/* facial features */}
