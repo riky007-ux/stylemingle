@@ -1,4 +1,5 @@
 'use client';
+
 import React from 'react';
 import { avatarExpressions, AvatarExpression } from './avatarExpressions';
 import { avatarTops, avatarBottoms } from './avatarClothing';
@@ -69,12 +70,12 @@ const Avatar: React.FC<AvatarProps> = ({ size = 'M', expression = 'neutral', out
         <circle cx="90" cy="55" r="4" fill="#000" />
         <circle cx="110" cy="55" r="4" fill="#000" />
         {/* Brows */}
-        <line x1="82" y1="45" x2="98" y2="45" stroke="#000" strokeWidth="2" />
-        <line x1="102" y1="45" x2="118" y2="45" stroke="#000" strokeWidth="2" />
+        <path d={variant.leftBrow} stroke="#000" strokeWidth={2} fill="none" />
+        <path d={variant.rightBrow} stroke="#000" strokeWidth={2} fill="none" />
         {/* Nose */}
         <line x1="100" y1="55" x2="100" y2="65" stroke="#000" strokeWidth="2" />
-        {/* Mouth (variant) */}
-        {variant}
+        {/* Mouth */}
+        <path d={variant.mouth} stroke="#000" strokeWidth={2} fill="none" />
       </g>
     </svg>
   );
