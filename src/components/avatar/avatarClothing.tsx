@@ -1,22 +1,26 @@
-'use client';
+import { ReactElement } from "react";
 
-import React from 'react';
-import type { AvatarSize } from './Avatar';
+export type AvatarTopKey = "tshirt-basic";
+export type AvatarBottomKey = "jeans-basic";
 
-export const avatarTops: Record<string, Record<AvatarSize, React.ReactNode>> = {
-  'tshirt-basic': {
-    S: <rect x={80} y={80} width={40} height={120} fill="#6EC1E4" />,
-    M: <rect x={75} y={80} width={50} height={120} fill="#6EC1E4" />,
-    L: <rect x={70} y={80} width={60} height={120} fill="#6EC1E4" />,
-    XL: <rect x={65} y={80} width={70} height={120} fill="#6EC1E4" />,
-  },
+export type AvatarOutfit = {
+  top?: AvatarTopKey;
+  bottom?: AvatarBottomKey;
 };
 
-export const avatarBottoms: Record<string, Record<AvatarSize, React.ReactNode>> = {
-  'jeans-basic': {
-    S: <rect x={80} y={203} width={40} height={160} fill="#3465A4" />,
-    M: <rect x={75} y={203} width={50} height={160} fill="#3465A4" />,
-    L: <rect x={70} y={203} width={60} height={160} fill="#3465A4" />,
-    XL: <rect x={65} y={203} width={70} height={160} fill="#3465A4" />,
-  },
+export const avatarTops: Record<AvatarTopKey, ReactElement> = {
+  "tshirt-basic": (
+    <g id="top">
+      <rect x={70} y={120} width={60} height={70} fill="#3b82f6" rx={8} />
+    </g>
+  ),
+};
+
+export const avatarBottoms: Record<AvatarBottomKey, ReactElement> = {
+  "jeans-basic": (
+    <g id="bottom">
+      <rect x={75} y={190} width={20} height={70} fill="#1f2937" />
+      <rect x={105} y={190} width={20} height={70} fill="#1f2937" />
+    </g>
+  ),
 };
