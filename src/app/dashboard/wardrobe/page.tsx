@@ -300,7 +300,7 @@ export default function WardrobePage() {
                   alt="Wardrobe item"
                   className="object-cover w-full h-40"
                 />
-                <div className="p-3 flex justify-end">
+                <div className="p-4 flex justify-end">
                   <button
                     onClick={() => handleDelete(item.id)}
                     className="text-sm text-red-500 hover:text-red-600"
@@ -313,25 +313,25 @@ export default function WardrobePage() {
           </div>
         ) : (
           !status && (
-            <p className="text-gray-500">
+            <p className="text-gray-500 text-center py-8">
               Your wardrobe is empty. Start by uploading your first item.
             </p>
           )
         )}
       </div>
-      <div className="mt-8">
+      <div className="mt-8 pt-8 border-t">
         <h2 className="text-2xl font-semibold mb-3">Generate Outfit</h2>
         <button
           onClick={handleGenerateOutfit}
           disabled={loading || generateLoading || items.length < 2}
-          className="border rounded-md px-4 py-3 hover:bg-gray-100 disabled:opacity-50"
+          className="border rounded-md px-4 py-3 hover:bg-gray-100 disabled:opacity-50 w-full sm:w-auto"
         >
           {generateLoading ? "Generating..." : "Generate Outfit"}
         </button>
         {generatedOutfit && (
-          <div className="mt-6 bg-white rounded-lg shadow-sm p-6">
+          <div className="mt-6 bg-white rounded-lg shadow-sm p-6 space-y-3">
             <h3 className="text-lg font-medium">{generatedOutfit.name}</h3>
-            <p className="mt-1 text-gray-700">{generatedOutfit.description}</p>
+            <p className="text-gray-700">{generatedOutfit.description}</p>
             <div className="flex flex-wrap gap-3 mt-3">
               {generatedOutfit.items.map((id) => {
                 const item = items.find((it) => it.id === id);
@@ -348,26 +348,26 @@ export default function WardrobePage() {
           </div>
         )}
       </div>
-      <div className="mt-8">
+      <div className="mt-8 pt-8 border-t">
         <h2 className="text-2xl font-semibold mb-3">Outfit History</h2>
         {outfits.length > 0 ? (
           outfits.map((outfit) => (
             <div
               key={outfit.id}
-              className="bg-white rounded-lg shadow-sm p-4 mb-4"
+              className="bg-white rounded-lg shadow-sm p-4 mb-4 space-y-2"
             >
               <h3 className="text-lg font-medium">{outfit.name}</h3>
               <p className="text-gray-700">{outfit.description}</p>
               <button
                 onClick={() => handleRegenerate(outfit.id)}
-                className="mt-2 text-blue-600 hover:underline"
+                className="mt-2 text-blue-600 hover:underline w-full sm:w-auto"
               >
                 Regenerate
               </button>
             </div>
           ))
         ) : (
-          <p className="text-gray-500">
+          <p className="text-gray-500 text-center py-8">
             No outfits yet. Generate an outfit to get started.
           </p>
         )}
