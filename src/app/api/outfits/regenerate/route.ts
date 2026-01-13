@@ -1,80 +1,112 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { outfits, wardrobe_items } from "@/lib/schema";
-import { eq, inArray } from "drizzle-orm";
-import jwt from "jsonwebtoken";
-import { OpenAI } from "openai";
+import { eq } from "drizzle-orm";
 import { randomUUID } from "crypto";
+import { getUserIdFromAuthHeader } from "@/lib/auth";
+import OpenAI from "openai";
 
-const SECRET = process.env.NEXTAUTH_SECRET || "secret";
-
-function getUserId(req: NextRequest): string | null {
-  const authHeader = req.headers.get("authorization");
-  if (!authHeader) return null;
-  const token = authHeader.replace("Bearer ", "");
-  try {
-    const decoded: any = jwt.verify(token, SECRET);
-    return decoded.userId || decoded.id || decoded.sub || null;
-  } catch {
-    return null;
-  }
-}
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY!,
+});
 
 export async function POST(req: NextRequest) {
-  const userId = getUserId(req);
+  const userId = getUserIdFromAuthHeader(req.headers);
+
   if (!userId) {
-    return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  let body;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ message: "Invalid JSON body" }, { status: 400 });
-  }
-  const { outfitId, instruction } = body || {};
+
+  const body = await req.json();
+  const { outfitId, instruction } = body;
+
   if (!outfitId) {
-    return NextResponse.json({ message: "outfitId is required" }, { status: 400 });
+    return NextResponse.json(
+      { error: "Missing outfitId" },
+      { status: 400 }
+    );
   }
+
   // Fetch original outfit
-  const orig = await db.select().from(outfits).where(eq(outfits.id, outfitId));
-  const original = orig[0];
-  if (!original || (original.userId && original.userId !== userId)) {
-    return NextResponse.json({ message: "Outfit not found" }, { status: 404 });
+  const [originalOutfit] = await db
+    .select()
+    .from(outfits)
+    .where(eq(outfits.id, outfitId));
+
+  if (!originalOutfit || originalOutfit.userId !== userId) {
+    return NextResponse.json(
+      { error: "Outfit not found" },
+      { status: 404 }
+    );
   }
-  const itemIds = Array.isArray(original.itemIds) ? original.itemIds : [];
-  // Fetch wardrobe items info
-  const wardrobeItems = await db
+
+  // Fetch wardrobe items
+  const items = await db
     .select()
     .from(wardrobe_items)
-    .where(inArray(wardrobe_items.id, itemIds));
-  const itemsList = wardrobeItems.map((item: any) => `${item.id}: ${item.description}`);
-  const itemsString = itemsList.join("\n");
-  // Build prompt
-  let userPrompt = `Given the following wardrobe items, suggest a new outfit. Only use the provided item ids. Provide output in JSON with keys name, description, items.`;
-  if (instruction && typeof instruction === "string" && instruction.trim() !== "") {
-    userPrompt += ` Please make it ${instruction.trim()}.`;
+    .where(eq(wardrobe_items.userId, userId));
+
+  if (items.length < 2) {
+    return NextResponse.json(
+      { error: "Not enough wardrobe items" },
+      { status: 400 }
+    );
   }
-  userPrompt += `\n\nWardrobe Items:\n${itemsString}`;
-  const systemPrompt = "You are a helpful assistant that suggests outfits using provided wardrobe items.";
-  const openai = new OpenAI();
+
+  const prompt = `
+You are a personal stylist.
+
+Wardrobe items:
+${items
+  .map(
+    (i) =>
+      `- ${i.category ?? "item"} (${i.color ?? "unknown color"}, ${
+        i.style ?? "unknown style"
+      })`
+  )
+  .join("\n")}
+
+Original outfit:
+Name: ${originalOutfit.name}
+Description: ${originalOutfit.description}
+
+User instruction:
+${instruction ?? "Improve this outfit creatively."}
+
+Return JSON with:
+{
+  "name": "...",
+  "description": "...",
+  "items": ["wardrobe_item_id_1", "wardrobe_item_id_2"]
+}
+`;
+
   const completion = await openai.chat.completions.create({
-    model: "gpt-4o",
-    messages: [
-      { role: "system", content: systemPrompt },
-      { role: "user", content: userPrompt },
-    ],
-    temperature: 0.7,
+    model: "gpt-4o-mini",
+    messages: [{ role: "user", content: prompt }],
   });
-  const message = completion.choices[0].message?.content || "";
+
   let parsed;
   try {
-    parsed = JSON.parse(message);
+    parsed = JSON.parse(completion.choices[0].message.content || "");
   } catch {
-    return NextResponse.json({ message: "Failed to parse OpenAI response", raw: message }, { status: 500 });
+    return NextResponse.json(
+      { error: "Failed to parse AI response" },
+      { status: 500 }
+    );
   }
-  if (!parsed || !parsed.name || !parsed.description || !Array.isArray(parsed.items)) {
-    return NextResponse.json({ message: "Invalid response from OpenAI", raw: parsed }, { status: 500 });
+
+  if (
+    !parsed?.name ||
+    !parsed?.description ||
+    !Array.isArray(parsed.items)
+  ) {
+    return NextResponse.json(
+      { error: "Invalid AI response" },
+      { status: 500 }
+    );
   }
+
   const [newOutfit] = await db
     .insert(outfits)
     .values({
@@ -82,9 +114,10 @@ export async function POST(req: NextRequest) {
       userId,
       name: parsed.name,
       description: parsed.description,
-      itemIds: parsed.items,
-      createdAt: Math.floor(Date.now() / 1000),
+      itemIds: JSON.stringify(parsed.items),
+      createdAt: new Date(), // ✅ FIXED
     })
     .returning();
+
   return NextResponse.json(newOutfit, { status: 200 });
 }
