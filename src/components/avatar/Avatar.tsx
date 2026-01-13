@@ -44,7 +44,7 @@ export const Avatar: React.FC<AvatarProps> = ({
   const skin = avatarSkinTones[skinTone ?? "default"];
   const topElement = outfit?.top ? avatarTops[outfit.top]?.[size] : null;
   const bottomElement = outfit?.bottom ? avatarBottoms[outfit.bottom]?.[size] : null;
-  const hairElement = hair ? avatarHair[hair] : null;
+  const hairElement = hair ? avatarHair[hair]?.[size] : null;
   const expressionElement = expression ? avatarExpressions[expression] : null;
 
   return (
