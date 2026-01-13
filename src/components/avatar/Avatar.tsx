@@ -4,6 +4,8 @@ import React from 'react';
 import { avatarExpressions, AvatarExpression } from './avatarExpressions';
 import { avatarTops, avatarBottoms } from './avatarClothing';
 import { avatarHair, AvatarHairKey } from './avatarHair';
+import { avatarHead, AvatarHeadShape } from './avatarHead';
+import { avatarSkinTones, AvatarSkinTone } from './avatarSkinTones';
 
 export type AvatarSize = 'S' | 'M' | 'L' | 'XL';
 
@@ -20,6 +22,8 @@ interface AvatarProps {
   expression?: AvatarExpression;
   outfit?: AvatarOutfit;
   hair?: AvatarHairKey;
+  headShape?: AvatarHeadShape;
+  skinTone?: AvatarSkinTone;
 }
 
 const sizeDimensions: Record<AvatarSize, { torsoWidth: number; hipWidth: number; shoulderWidth: number }> = {
@@ -29,7 +33,14 @@ const sizeDimensions: Record<AvatarSize, { torsoWidth: number; hipWidth: number;
   XL: { torsoWidth: 70, hipWidth: 70, shoulderWidth: 70 },
 };
 
-const Avatar: React.FC<AvatarProps> = ({ size = 'M', expression = 'neutral', outfit, hair = 'none' }) => {
+const Avatar: React.FC<AvatarProps> = ({
+  size = 'M',
+  expression = 'neutral',
+  outfit,
+  hair = 'none',
+  headShape = 'oval',
+  skinTone = 'light',
+}) => {
   const dims = sizeDimensions[size];
   const variant = avatarExpressions[expression] ?? avatarExpressions.neutral;
   const shoulderX = (200 - dims.shoulderWidth) / 2;
@@ -38,11 +49,13 @@ const Avatar: React.FC<AvatarProps> = ({ size = 'M', expression = 'neutral', out
   const topElement = outfit?.top ? avatarTops[outfit.top][size] : null;
   const bottomElement = outfit?.bottom ? avatarBottoms[outfit.bottom][size] : null;
   const hairElement = avatarHair[hair][size] ?? null;
+  const headElement = avatarHead[headShape][size];
+  const skinColor = avatarSkinTones[skinTone];
 
   return (
     <svg width="200" height="400" viewBox="0 0 200 400" xmlns="http://www.w3.org/2000/svg">
       {/* Base body layer */}
-      <g id="base-body" fill="#f5c6a5">
+      <g id="base-body" fill={skinColor}>
         {/* Shoulders */}
         <rect x={shoulderX} y={80} width={dims.shoulderWidth} height={40} />
         {/* Torso */}
@@ -64,16 +77,16 @@ const Avatar: React.FC<AvatarProps> = ({ size = 'M', expression = 'neutral', out
       </g>
       {/* Face layer */}
       <g id="face">
-        {/* Head circle */}
-        <circle cx="100" cy="60" r="30" fill="#f5c6a5" />
+        {/* Head */}
+        {React.cloneElement(headElement, { fill: skinColor })}
         {/* Eyes */}
-        <circle cx="90" cy="55" r="4" fill="#000" />
-        <circle cx="110" cy="55" r="4" fill="#000" />
+        <circle cx="90" cy="55" r={4} fill="#000" />
+        <circle cx="110" cy="55" r={4} fill="#000" />
         {/* Brows */}
         <path d={variant.leftBrow} stroke="#000" strokeWidth={2} fill="none" />
         <path d={variant.rightBrow} stroke="#000" strokeWidth={2} fill="none" />
         {/* Nose */}
-        <line x1="100" y1="55" x2="100" y2="65" stroke="#000" strokeWidth="2" />
+        <line x1={100} y1={55} x2={100} y2={65} stroke="#000" strokeWidth={2} />
         {/* Mouth */}
         <path d={variant.mouth} stroke="#000" strokeWidth={2} fill="none" />
       </g>
