@@ -45,7 +45,7 @@ export const Avatar: React.FC<AvatarProps> = ({
   const topElement = outfit?.top ? avatarTops[outfit.top]?.[size] : null;
   const bottomElement = outfit?.bottom ? avatarBottoms[outfit.bottom]?.[size] : null;
   const hairElement = hair ? avatarHair[hair]?.[size] : null;
-  const expressionElement = expression ? avatarExpressions[expression] : null;
+  const expressionParts = expression ? avatarExpressions[expression] : null;
 
   return (
     <svg
@@ -71,7 +71,9 @@ export const Avatar: React.FC<AvatarProps> = ({
         {/* hair */}
         {hairElement}
         {/* facial features */}
-        {expressionElement}
+        {expressionParts?.mouth}
+        {expressionParts?.leftBrow}
+        {expressionParts?.rightBrow}
       </g>
     </svg>
   );
