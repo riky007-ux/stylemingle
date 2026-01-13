@@ -1,11 +1,12 @@
-"use client";
-
+'use client';
 import React from 'react';
 
 export type AvatarSize = 'S' | 'M' | 'L' | 'XL';
+export type AvatarExpression = 'neutral' | 'soft-smile';
 
 interface AvatarProps {
   size?: AvatarSize;
+  expression?: AvatarExpression;
 }
 
 const sizeDimensions: Record<AvatarSize, { torsoWidth: number; hipWidth: number; shoulderWidth: number }> = {
@@ -15,15 +16,28 @@ const sizeDimensions: Record<AvatarSize, { torsoWidth: number; hipWidth: number;
   XL: { torsoWidth: 70, hipWidth: 70, shoulderWidth: 70 },
 };
 
-const Avatar: React.FC<AvatarProps> = ({ size = 'M' }) => {
-  const dims = sizeDimensions[size];
+const expressionVariants: Record<AvatarExpression, { mouth: string; leftBrow: string; rightBrow: string }> = {
+  neutral: {
+    mouth: 'M90 65 Q100 67 110 65',
+    leftBrow: 'M84 38 Q90 36 96 38',
+    rightBrow: 'M104 38 Q110 36 116 38',
+  },
+  'soft-smile': {
+    mouth: 'M90 65 Q100 70 110 65',
+    leftBrow: 'M84 37 Q90 35 96 37',
+    rightBrow: 'M104 37 Q110 35 116 37',
+  },
+};
 
+const Avatar: React.FC<AvatarProps> = ({ size = 'M', expression = 'neutral' }) => {
+  const dims = sizeDimensions[size];
+  const variant = expressionVariants[expression] ?? expressionVariants.neutral;
   const shoulderX = (200 - dims.shoulderWidth) / 2;
   const torsoX = (200 - dims.torsoWidth) / 2;
   const hipX = (200 - dims.hipWidth) / 2;
 
   return (
-    <svg width={200} height={400} viewBox="0 0 200 400">
+    <svg width={200} height={400} viewBox="0 0 200 400" xmlns="http://www.w3.org/2000/svg">
       {/* Base body layer */}
       <g id="base-body" fill="#f5c6a5">
         {/* Shoulders */}
@@ -36,34 +50,22 @@ const Avatar: React.FC<AvatarProps> = ({ size = 'M' }) => {
         <rect x={70} y={260} width={25} height={100} />
         <rect x={105} y={260} width={25} height={100} />
       </g>
+
       {/* Face layer */}
       <g id="face">
-        <g id="head-shape">
-          <circle cx={100} cy={50} r={30} fill="#f5c6a5" />
-        </g>
-        <g id="eyes" fill="#3d2e24">
-          <circle cx={90} cy={45} r={3} />
-          <circle cx={110} cy={45} r={3} />
-        </g>
-        <g id="brows" stroke="#3d2e24" strokeWidth={2} strokeLinecap="round" fill="none">
-          <path d="M84 38 Q90 36 96 38" />
-          <path d="M104 38 Q110 36 116 38" />
-        </g>
-        <g id="nose" fill="#3d2e24">
-          <rect x={99} y={50} width={2} height={8} rx={1} />
-        </g>
-        <g id="mouth" stroke="#3d2e24" strokeWidth={2} strokeLinecap="round" fill="none">
-          <path d="M90 65 Q100 67 110 65" />
-        </g>
+        {/* Head shape */}
+        <circle cx={100} cy={40} r={30} fill="#f5c6a5" />
+        {/* Eyes */}
+        <circle cx={90} cy={40} r={3} fill="#000" />
+        <circle cx={110} cy={40} r={3} fill="#000" />
+        {/* Brows */}
+        <path d={variant.leftBrow} stroke="#000" strokeWidth={2} fill="none" />
+        <path d={variant.rightBrow} stroke="#000" strokeWidth={2} fill="none" />
+        {/* Nose */}
+        <circle cx={100} cy={50} r={2} fill="#000" />
+        {/* Mouth */}
+        <path d={variant.mouth} stroke="#000" strokeWidth={2} fill="none" />
       </g>
-      {/* Bottoms layer */}
-      <g id="bottoms"></g>
-      {/* Tops layer */}
-      <g id="tops"></g>
-      {/* Outerwear layer */}
-      <g id="outerwear"></g>
-      {/* Accessories layer */}
-      <g id="accessories"></g>
     </svg>
   );
 };
