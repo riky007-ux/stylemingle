@@ -1,12 +1,22 @@
 'use client';
 import React from 'react';
 import { avatarExpressions, AvatarExpression } from './avatarExpressions';
+import { avatarTops, avatarBottoms } from './avatarClothing';
 
 export type AvatarSize = 'S' | 'M' | 'L' | 'XL';
+
+type AvatarTopName = keyof typeof avatarTops;
+type AvatarBottomName = keyof typeof avatarBottoms;
+
+interface AvatarOutfit {
+  top?: AvatarTopName;
+  bottom?: AvatarBottomName;
+}
 
 interface AvatarProps {
   size?: AvatarSize;
   expression?: AvatarExpression;
+  outfit?: AvatarOutfit;
 }
 
 const sizeDimensions: Record<AvatarSize, { torsoWidth: number; hipWidth: number; shoulderWidth: number }> = {
@@ -16,12 +26,15 @@ const sizeDimensions: Record<AvatarSize, { torsoWidth: number; hipWidth: number;
   XL: { torsoWidth: 70, hipWidth: 70, shoulderWidth: 70 },
 };
 
-const Avatar: React.FC<AvatarProps> = ({ size = 'M', expression = 'neutral' }) => {
+const Avatar: React.FC<AvatarProps> = ({ size = 'M', expression = 'neutral', outfit }) => {
   const dims = sizeDimensions[size];
   const variant = avatarExpressions[expression] ?? avatarExpressions.neutral;
   const shoulderX = (200 - dims.shoulderWidth) / 2;
   const torsoX = (200 - dims.torsoWidth) / 2;
   const hipX = (200 - dims.hipWidth) / 2;
+
+  const topElement = outfit?.top ? avatarTops[outfit.top]?.[size] : null;
+  const bottomElement = outfit?.bottom ? avatarBottoms[outfit.bottom]?.[size] : null;
 
   return (
     <svg width={200} height={400} viewBox="0 0 200 400" xmlns="http://www.w3.org/2000/svg">
@@ -36,6 +49,12 @@ const Avatar: React.FC<AvatarProps> = ({ size = 'M', expression = 'neutral' }) =
         {/* Legs */}
         <rect x={70} y={260} width={25} height={100} />
         <rect x={105} y={260} width={25} height={100} />
+      </g>
+
+      {/* Clothing layer */}
+      <g id="clothing">
+        {topElement}
+        {bottomElement}
       </g>
 
       {/* Face layer */}
