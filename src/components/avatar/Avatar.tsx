@@ -1,97 +1,101 @@
-'use client';
+"use client";
 
-import React from 'react';
-import { avatarExpressions, AvatarExpression } from './avatarExpressions';
-import { avatarTops, avatarBottoms } from './avatarClothing';
-import { avatarHair, AvatarHairKey } from './avatarHair';
-import { avatarHead, AvatarHeadShape } from './avatarHead';
-import { avatarSkinTones, AvatarSkinTone } from './avatarSkinTones';
+import React from "react";
+import { avatarExpressions, AvatarExpression } from "./avatarExpressions";
+import { avatarHair, AvatarHairKey } from "./avatarHair";
+import { avatarTops, avatarBottoms, AvatarOutfit } from "./avatarClothing";
+import { avatarHeadShapes, AvatarHeadShape } from "./avatarHeadShapes";
+import { avatarSkinTones, AvatarSkinTone } from "./avatarSkinTones";
 
-export type AvatarSize = 'S' | 'M' | 'L' | 'XL';
+type AvatarSize = "S" | "M" | "L" | "XL";
 
-type AvatarTopName = keyof typeof avatarTops;
-type AvatarBottomName = keyof typeof avatarBottoms;
-
-interface AvatarOutfit {
-  top?: AvatarTopName;
-  bottom?: AvatarBottomName;
-}
-
-interface AvatarProps {
+type AvatarProps = {
   size?: AvatarSize;
   expression?: AvatarExpression;
-  outfit?: AvatarOutfit;
   hair?: AvatarHairKey;
+  outfit?: AvatarOutfit;
   headShape?: AvatarHeadShape;
   skinTone?: AvatarSkinTone;
-}
-
-const sizeDimensions: Record<AvatarSize, { torsoWidth: number; hipWidth: number; shoulderWidth: number }> = {
-  S: { torsoWidth: 40, hipWidth: 40, shoulderWidth: 40 },
-  M: { torsoWidth: 50, hipWidth: 50, shoulderWidth: 50 },
-  L: { torsoWidth: 60, hipWidth: 60, shoulderWidth: 60 },
-  XL: { torsoWidth: 70, hipWidth: 70, shoulderWidth: 70 },
 };
 
-const Avatar: React.FC<AvatarProps> = ({
-  size = 'M',
-  expression = 'neutral',
+const sizeMap = {
+  S: { scale: 0.85 },
+  M: { scale: 1 },
+  L: { scale: 1.15 },
+  XL: { scale: 1.3 },
+};
+
+export default function Avatar({
+  size = "M",
+  expression = "neutral",
+  hair = "none",
   outfit,
-  hair = 'none',
-  headShape = 'oval',
-  skinTone = 'light',
-}) => {
-  const dims = sizeDimensions[size];
-  const variant = avatarExpressions[expression] ?? avatarExpressions.neutral;
-  const shoulderX = (200 - dims.shoulderWidth) / 2;
-  const torsoX = (200 - dims.torsoWidth) / 2;
-  const hipX = (200 - dims.hipWidth) / 2;
-  const topElement = outfit?.top ? avatarTops[outfit.top][size] : null;
-  const bottomElement = outfit?.bottom ? avatarBottoms[outfit.bottom][size] : null;
-  const hairElement = avatarHair[hair][size] ?? null;
-  const headElement = avatarHead[headShape][size];
+  headShape = "oval",
+  skinTone = "medium",
+}: AvatarProps) {
+  const scale = sizeMap[size].scale;
+
+  const face = avatarExpressions[expression];
+  const headElement = avatarHeadShapes[headShape];
   const skinColor = avatarSkinTones[skinTone];
 
+  const hairElement = avatarHair[hair]?.[size] ?? null;
+  const topElement = outfit?.top ? avatarTops[outfit.top]?.[size] : null;
+  const bottomElement = outfit?.bottom
+    ? avatarBottoms[outfit.bottom]?.[size]
+    : null;
+
   return (
-    <svg width="200" height="400" viewBox="0 0 200 400" xmlns="http://www.w3.org/2000/svg">
-      {/* Base body layer */}
-      <g id="base-body" fill={skinColor}>
-        {/* Shoulders */}
-        <rect x={shoulderX} y={80} width={dims.shoulderWidth} height={40} />
-        {/* Torso */}
-        <rect x={torsoX} y={120} width={dims.torsoWidth} height={80} />
-        {/* Hips */}
-        <rect x={hipX} y={200} width={dims.hipWidth} height={40} />
-        {/* Legs */}
-        <rect x={70} y={260} width={25} height={100} />
-        <rect x={105} y={260} width={25} height={100} />
+    <svg
+      width={200}
+      height={420}
+      viewBox="0 0 200 420"
+      xmlns="http://www.w3.org/2000/svg"
+      style={{ transform: `scale(${scale})` }}
+    >
+      {/* BODY */}
+      <g id="body" fill={skinColor}>
+        <rect x={70} y={120} width={60} height={80} rx={12} />
+        <rect x={60} y={200} width={80} height={90} rx={14} />
+        <rect x={65} y={290} width={25} height={110} rx={10} />
+        <rect x={110} y={290} width={25} height={110} rx={10} />
       </g>
-      {/* Clothing layer */}
+
+      {/* CLOTHING */}
       <g id="clothing">
         {topElement}
         {bottomElement}
       </g>
-      {/* Hair layer */}
-      <g id="hair">
-        {hairElement}
-      </g>
-      {/* Face layer */}
+
+      {/* HAIR */}
+      <g id="hair">{hairElement}</g>
+
+      {/* FACE */}
       <g id="face">
-        {/* Head */}
-        {React.cloneElement(headElement, { fill: skinColor })}
-        {/* Eyes */}
-        <circle cx="90" cy="55" r={4} fill="#000" />
-        <circle cx="110" cy="55" r={4} fill="#000" />
-        {/* Brows */}
-        <path d={variant.leftBrow} stroke="#000" strokeWidth={2} fill="none" />
-        <path d={variant.rightBrow} stroke="#000" strokeWidth={2} fill="none" />
-        {/* Nose */}
-        <line x1={100} y1={55} x2={100} y2={65} stroke="#000" strokeWidth={2} />
-        {/* Mouth */}
-        <path d={variant.mouth} stroke="#000" strokeWidth={2} fill="none" />
+        {/* HEAD */}
+        {React.cloneElement(
+          headElement as React.ReactElement<any>,
+          { fill: skinColor }
+        )}
+
+        {/* EYES */}
+        <circle cx="85" cy="70" r="4" fill="#000" />
+        <circle cx="115" cy="70" r="4" fill="#000" />
+
+        {/* BROWS */}
+        {face.leftBrow}
+        {face.rightBrow}
+
+        {/* NOSE */}
+        <path
+          d="M100 75 L96 88 L104 88 Z"
+          fill="#C6865B"
+          opacity={0.9}
+        />
+
+        {/* MOUTH */}
+        {face.mouth}
       </g>
     </svg>
   );
-};
-
-export default Avatar;
+}
