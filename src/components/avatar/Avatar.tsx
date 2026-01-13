@@ -1,9 +1,15 @@
 "use client";
+
 import React from "react";
 import { avatarExpressions, AvatarExpression } from "./avatarExpressions";
 import { avatarHair, AvatarHairKey } from "./avatarHair";
 import { avatarSkinTones, AvatarSkinTone } from "./avatarSkinTones";
-import { avatarTops, avatarBottoms, AvatarTopKey, AvatarBottomKey } from "./avatarClothing";
+import {
+  avatarTops,
+  avatarBottoms,
+  AvatarTopKey,
+  AvatarBottomKey,
+} from "./avatarClothing";
 
 export type AvatarSize = "S" | "M" | "L" | "XL";
 
@@ -35,8 +41,8 @@ export default function Avatar({
   outfit = { top: "tshirt-basic", bottom: "jeans-basic" },
 }: AvatarProps) {
   const scale = sizeScale[size];
-  const hairElement = avatarHair[hair]?.[size] ?? null;
   const face = avatarExpressions[expression];
+  const hairElement = avatarHair[hair]?.[size] ?? null;
   const skinColor = avatarSkinTones[skinTone];
   const topElement = outfit?.top ? avatarTops[outfit.top] : null;
   const bottomElement = outfit?.bottom ? avatarBottoms[outfit.bottom] : null;
@@ -45,7 +51,7 @@ export default function Avatar({
     <svg
       width={200 * scale}
       height={420 * scale}
-      viewBox="0 200 420"
+      viewBox="0 0 200 420"
       xmlns="http://www.w3.org/2000/svg"
     >
       {/* BODY */}
@@ -55,14 +61,11 @@ export default function Avatar({
         <rect x={78} y={300} width={20} height={100} />
         <rect x={110} y={300} width={20} height={100} />
       </g>
-
       {/* CLOTHING */}
       {topElement}
       {bottomElement}
-
       {/* HAIR */}
       {hairElement}
-
       {/* FACE */}
       <g transform="translate(0,0)">
         <circle cx="100" cy="55" r="32" fill={skinColor} />
