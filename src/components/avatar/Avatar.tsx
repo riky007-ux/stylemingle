@@ -55,7 +55,7 @@ export const Avatar: React.FC<AvatarProps> = ({
   const expressionParts = expression ? avatarExpressions[expression] : null;
 
   // define a neutral shadow color
-  const shadowColor = "rgba(0, 0, 0, 0.12)";
+  const shadowColor = "rgba(0, 0, 0, 0.18)";
 
   return (
     <svg
@@ -74,7 +74,7 @@ export const Avatar: React.FC<AvatarProps> = ({
           rx={8}
           fill={skin}
           stroke="black"
-          strokeOpacity={0.04}
+          strokeOpacity={0.08}
         />
         <rect
           x={100}
@@ -84,7 +84,7 @@ export const Avatar: React.FC<AvatarProps> = ({
           rx={8}
           fill={skin}
           stroke="black"
-          strokeOpacity={0.04}
+          strokeOpacity={0.08}
         />
         {/* pants overlay legs */}
         {bottomElement}
@@ -106,7 +106,7 @@ export const Avatar: React.FC<AvatarProps> = ({
           rx={20}
           fill={skin}
           stroke="black"
-          strokeOpacity={0.04}
+          strokeOpacity={0.08}
         />
         {/* top overlay torso but under head */}
         {topElement}
@@ -121,10 +121,10 @@ export const Avatar: React.FC<AvatarProps> = ({
           rx={8}
           fill={skin}
           stroke="black"
-          strokeOpacity={0.04}
+          strokeOpacity={0.08}
         />
         {/* head */}
-        <circle cx={100} cy={60} r={30} fill={skin} stroke="black" strokeOpacity={0.04} />
+        <circle cx={100} cy={60} r={30} fill={skin} stroke="black" strokeOpacity={0.08} />
         {/* hair */}
         {hairElement}
         {/* facial features */}
