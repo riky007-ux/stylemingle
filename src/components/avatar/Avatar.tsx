@@ -43,19 +43,14 @@ export const Avatar: React.FC<AvatarProps> = ({
   const scale = sizeScale[size] ?? 1;
   const skin = avatarSkinTones[skinTone ?? "default"];
 
-  // Determine safe clothing keys with neutral fallbacks.
-  const resolvedTopKey: AvatarTopKey =
-    outfit?.top && avatarTops[outfit.top]
-      ? (outfit.top as AvatarTopKey)
-      : ("tshirt-basic" as AvatarTopKey);
-  const resolvedBottomKey: AvatarBottomKey =
-    outfit?.bottom && avatarBottoms[outfit.bottom]
-      ? (outfit.bottom as AvatarBottomKey)
-      : ("jeans-basic" as AvatarBottomKey);
+  // Determine top and bottom keys with fallbacks
+  const topKey: AvatarTopKey =
+    outfit?.top && avatarTops[outfit.top] ? outfit.top : "tshirt-basic";
+  const bottomKey: AvatarBottomKey =
+    outfit?.bottom && avatarBottoms[outfit.bottom] ? outfit.bottom : "jeans-basic";
 
-  const topElement = avatarTops[resolvedTopKey]?.[size] ?? null;
-  const bottomElement = avatarBottoms[resolvedBottomKey]?.[size] ?? null;
-
+  const topElement = avatarTops[topKey]?.[size] ?? null;
+  const bottomElement = avatarBottoms[bottomKey]?.[size] ?? null;
   const hairElement = hair ? avatarHair[hair]?.[size] : null;
   const expressionParts = expression ? avatarExpressions[expression] : null;
 
