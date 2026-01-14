@@ -24,7 +24,7 @@ export const avatarTops: Record<AvatarTopKey, ReactElement> = {
       <g id="top">
         <rect x={65} y={120} width={70} height={75} rx={14} fill="url(#tshirt-basic-fill)" />
         <rect x={65} y={120} width={70} height={75} rx={14} fill="url(#tshirt-basic-highlight)" />
-        <rect x={65} y={120} width={70} height={75} rx={14} fill="none" stroke="#000" strokeOpacity={0.04} />
+        <rect x={65} y={120} width={70} height={75} rx={14} fill="none" stroke="#000" strokeOpacity={0.08} />
       </g>
     </>
   ),
@@ -47,11 +47,11 @@ export const avatarBottoms: Record<AvatarBottomKey, ReactElement> = {
         {/* left pant leg */}
         <rect x={75} y={190} width={20} height={75} rx={6} fill="url(#jeans-basic-fill)" />
         <rect x={75} y={190} width={20} height={75} rx={6} fill="url(#jeans-basic-highlight)" />
-        <rect x={75} y={190} width={20} height={75} rx={6} fill="none" stroke="#000" strokeOpacity={0.04} />
+        <rect x={75} y={190} width={20} height={75} rx={6} fill="none" stroke="#000" strokeOpacity={0.08} />
         {/* right pant leg */}
         <rect x={105} y={190} width={20} height={75} rx={6} fill="url(#jeans-basic-fill)" />
         <rect x={105} y={190} width={20} height={75} rx={6} fill="url(#jeans-basic-highlight)" />
-        <rect x={105} y={190} width={20} height={75} rx={6} fill="none" stroke="#000" strokeOpacity={0.04} />
+        <rect x={105} y={190} width={20} height={75} rx={6} fill="none" stroke="#000" strokeOpacity={0.08} />
       </g>
     </>
   ),
