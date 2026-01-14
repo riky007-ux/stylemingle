@@ -261,7 +261,7 @@ export default function WardrobePage() {
   }
 
   return (
-    <div className="p-6 md:p-8">
+    <div className="min-h-screen bg-gray-50 p-6 md:p-12 max-w-7xl mx-auto">
       <h1 className="text-3xl font-semibold mb-6">Your Wardrobe</h1>
       <div className="flex flex-col sm:flex-row gap-3 mb-6">
         <button
