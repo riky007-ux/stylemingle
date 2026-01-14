@@ -42,8 +42,20 @@ export const Avatar: React.FC<AvatarProps> = ({
 }) => {
   const scale = sizeScale[size] ?? 1;
   const skin = avatarSkinTones[skinTone ?? "default"];
-  const topElement = outfit?.top ? avatarTops[outfit.top]?.[size] : null;
-  const bottomElement = outfit?.bottom ? avatarBottoms[outfit.bottom]?.[size] : null;
+
+  // Determine safe clothing keys with neutral fallbacks.
+  const resolvedTopKey: AvatarTopKey =
+    outfit?.top && avatarTops[outfit.top]
+      ? (outfit.top as AvatarTopKey)
+      : ("tshirt-basic" as AvatarTopKey);
+  const resolvedBottomKey: AvatarBottomKey =
+    outfit?.bottom && avatarBottoms[outfit.bottom]
+      ? (outfit.bottom as AvatarBottomKey)
+      : ("jeans-basic" as AvatarBottomKey);
+
+  const topElement = avatarTops[resolvedTopKey]?.[size] ?? null;
+  const bottomElement = avatarBottoms[resolvedBottomKey]?.[size] ?? null;
+
   const hairElement = hair ? avatarHair[hair]?.[size] : null;
   const expressionParts = expression ? avatarExpressions[expression] : null;
 
@@ -82,7 +94,14 @@ export const Avatar: React.FC<AvatarProps> = ({
         {/* pants overlay legs */}
         {bottomElement}
         {/* subtle shadow where torso meets pants */}
-        <rect x={60} y={185} width={80} height={10} rx={8} fill={shadowColor} />
+        <rect
+          x={60}
+          y={185}
+          width={80}
+          height={10}
+          rx={8}
+          fill={shadowColor}
+        />
         {/* torso */}
         <rect
           x={60}
@@ -110,14 +129,7 @@ export const Avatar: React.FC<AvatarProps> = ({
           strokeOpacity={0.04}
         />
         {/* head */}
-        <circle
-          cx={100}
-          cy={60}
-          r={30}
-          fill={skin}
-          stroke="black"
-          strokeOpacity={0.04}
-        />
+        <circle cx={100} cy={60} r={30} fill={skin} stroke="black" strokeOpacity={0.04} />
         {/* hair */}
         {hairElement}
         {/* facial features */}
