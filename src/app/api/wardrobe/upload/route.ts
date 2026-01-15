@@ -10,52 +10,100 @@ import crypto from "crypto";
 
 export async function POST(req: Request) {
   try {
-    console.log("Starting upload handler");
-    const userId = getUserIdFromAuthHeader(req.headers);
+    console.log("UPLOAD: start");
+
+    // --- AUTH (never throw) ---
+    let userId: string | null = null;
+    try {
+      userId = getUserIdFromAuthHeader(req.headers);
+    } catch (err) {
+      console.error("UPLOAD: auth parse failed", err);
+      return NextResponse.json(
+        { success: false, error: "Unauthorized" },
+        { status: 401 }
+      );
+    }
+
     if (!userId) {
-      console.log("No user id");
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      return NextResponse.json(
+        { success: false, error: "Unauthorized" },
+        { status: 401 }
+      );
     }
 
-    const formData = await req.formData();
-    const file = formData.get("file") as File | null;
-    if (!file || typeof (file as any).arrayBuffer !== "function") {
-      console.log("File missing");
-      return NextResponse.json({ error: "file required" }, { status: 400 });
+    // --- FORM DATA ---
+    let formData: FormData;
+    try {
+      formData = await req.formData();
+    } catch (err) {
+      console.error("UPLOAD: formData parse failed", err);
+      return NextResponse.json(
+        { success: false, error: "Invalid form data" },
+        { status: 400 }
+      );
     }
 
-    // Generate unique filename
-    const fileName = crypto.randomUUID();
+    const file = formData.get("file");
 
-    // Upload to storage
-    const blob = await put(fileName, file, {
-      access: "public",
-    });
-    const imageUrl = blob.url;
+    if (!(file instanceof File)) {
+      return NextResponse.json(
+        { success: false, error: "File missing" },
+        { status: 400 }
+      );
+    }
 
-    // Insert record into database with explicit values
+    // --- BLOB UPLOAD ---
+    const filename = crypto.randomUUID();
+    let blob;
+    try {
+      blob = await put(filename, file, {
+        access: "public",
+        contentType: file.type || "application/octet-stream",
+      });
+    } catch (err) {
+      console.error("UPLOAD: blob upload failed", err);
+      return NextResponse.json(
+        { success: false, error: "Upload failed" },
+        { status: 500 }
+      );
+    }
+
+    // --- DB INSERT (explicit, unbreakable) ---
     const id = crypto.randomUUID();
     const createdAt = new Date();
-    await db.insert(wardrobe_items).values({
-      id,
-      userId,
-      imageUrl,
-      category: "unknown",
-      color: "unknown",
-      style: "unknown",
-      season: "unknown",
-      notes: null,
-      createdAt,
-    });
 
+    try {
+      await db.insert(wardrobe_items).values({
+        id,
+        userId,
+        imageUrl: blob.url,
+        category: "unknown",
+        color: "unknown",
+        style: "unknown",
+        season: "unknown",
+        notes: null,
+        createdAt,
+      });
+    } catch (err) {
+      console.error("UPLOAD: db insert failed", err);
+      return NextResponse.json(
+        { success: false, error: "Database error" },
+        { status: 500 }
+      );
+    }
+
+    console.log("UPLOAD: success");
+
+    // --- SAFE RESPONSE ---
+    return NextResponse.json({
+      success: true,
+      id,
+      imageUrl: blob.url,
+    });
+  } catch (err) {
+    console.error("UPLOAD: fatal error", err);
     return NextResponse.json(
-      { success: true, imageUrl, id },
-      { status: 200 }
-    );
-  } catch (error: any) {
-    console.error("UPLOAD_ERROR", error);
-    return NextResponse.json(
-      { error: "Failed to upload" },
+      { success: false, error: "Internal upload error" },
       { status: 500 }
     );
   }
