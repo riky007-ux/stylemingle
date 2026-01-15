@@ -1,3 +1,6 @@
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { wardrobe_items } from "@/lib/schema";
@@ -21,9 +24,13 @@ export async function POST(req: Request) {
 
     const typedFile = file as File;
     const mime = typedFile.type || "application/octet-stream";
-    if (!mime.startsWith("image/")) {
+    if (
+      mime !== "application/octet-stream" &&
+      !mime.startsWith("image/")
+    ) {
       return NextResponse.json({ error: "invalid file type" }, { status: 400 });
     }
+
     const maxSize = 10 * 1024 * 1024; // 10 MB
     if (typedFile.size > maxSize) {
       return NextResponse.json({ error: "file too large" }, { status: 400 });
@@ -31,8 +38,12 @@ export async function POST(req: Request) {
 
     // Create a unique filename
     const fileName = `${crypto.randomUUID()}-${typedFile.name}`;
-    // Upload to Vercel Blob
-    const blob = await put(fileName, typedFile, { access: "public" });
+
+    // Upload to Vercel Blob with content type fallback
+    const blob = await put(fileName, typedFile, {
+      access: "public",
+      contentType: mime,
+    });
     const imageUrl = blob.url;
 
     const id = crypto.randomUUID();
@@ -49,7 +60,7 @@ export async function POST(req: Request) {
 
     return NextResponse.json(result[0], { status: 200 });
   } catch (error: any) {
-    console.error(error);
+    console.error("UPLOAD_ERROR", error);
     return NextResponse.json(
       { error: "Internal Server Error" },
       { status: 500 }
