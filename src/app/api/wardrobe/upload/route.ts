@@ -24,7 +24,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "file required" }, { status: 400 });
     }
 
-    // Generate a unique filename
+    // Generate unique filename
     const fileName = crypto.randomUUID();
 
     // Upload to storage
@@ -33,25 +33,30 @@ export async function POST(req: Request) {
     });
     const imageUrl = blob.url;
 
-    // Insert record into database
+    // Insert record into database with explicit values
     const id = crypto.randomUUID();
     const createdAt = new Date();
-    const result = await db
-      .insert(wardrobe_items)
-      .values({
-        id,
-        userId,
-        imageUrl,
-        createdAt,
-      })
-      .returning();
+    await db.insert(wardrobe_items).values({
+      id,
+      userId,
+      imageUrl,
+      category: "unknown",
+      color: "unknown",
+      style: "unknown",
+      season: "unknown",
+      notes: null,
+      createdAt,
+    });
 
-    return NextResponse.json(result[0], { status: 200 });
+    return NextResponse.json(
+      { success: true, imageUrl, id },
+      { status: 200 }
+    );
   } catch (error: any) {
     console.error("UPLOAD_ERROR", error);
     return NextResponse.json(
-      { error: error?.message || "Internal Server Error" },
-      { status: 500 },
+      { error: "Failed to upload" },
+      { status: 500 }
     );
   }
 }
