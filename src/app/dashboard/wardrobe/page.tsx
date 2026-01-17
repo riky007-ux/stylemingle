@@ -78,6 +78,7 @@ export default function WardrobePage() {
 
       const res = await fetch("/api/wardrobe/upload", {
         method: "POST",
+        credentials: "include",
         headers: {
           Authorization: `Bearer ${token}`,
         },
