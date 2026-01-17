@@ -13,17 +13,33 @@ export async function POST(req: Request) {
     // --- AUTH ---
     let userId: string | null = null;
     try {
+      // try from Authorization header
       userId = getUserIdFromAuthHeader(req.headers);
+      // fallback to cookie "auth" if header missing/invalid
+      if (!userId) {
+        const cookieHeader = req.headers.get("cookie") || "";
+        const authCookiePair = cookieHeader
+          .split(";")
+          .map((c) => c.trim())
+          .find((c) => c.startsWith("auth="));
+        if (authCookiePair) {
+          const cookieVal = decodeURIComponent(authCookiePair.split("=")[1] || "");
+          const headerVal = cookieVal.startsWith("Bearer") ? cookieVal : `Bearer ${cookieVal}`;
+          const fallbackHeaders = new Headers();
+          fallbackHeaders.set("Authorization", headerVal);
+          userId = getUserIdFromAuthHeader(fallbackHeaders);
+        }
+      }
     } catch (err) {
       console.error("UPLOAD auth parse failed", err);
       return NextResponse.json(
-        { success: false, error: "Unauthorized" },
+        { error: "Unauthorized" },
         { status: 401 }
       );
     }
 
     if (!userId) {
-      return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     // --- FORM DATA ---
@@ -34,7 +50,7 @@ export async function POST(req: Request) {
 
     if (!file) {
       return NextResponse.json(
-        { success: false, error: "No file provided" },
+        { error: "No file provided" },
         { status: 400 }
       );
     }
@@ -42,52 +58,66 @@ export async function POST(req: Request) {
     if (file.size > MAX_SIZE_BYTES) {
       return NextResponse.json(
         {
-          success: false,
           error: "Image too large. Please choose a photo under 10 MB.",
         },
         { status: 413 }
       );
     }
 
-    // --- BLOB UPLOAD ---
-    const ext =
-      file.type && file.type.includes("/")
-        ? file.type.split("/")[1]
-        : "jpg";
+    try {
+      // --- BLOB UPLOAD ---
+      const ext =
+        file.type && file.type.includes("/")
+          ? file.type.split("/")[1]
+          : "jpg";
 
-    const filename = `${crypto.randomUUID()}.${ext}`;
+      const filename = `${crypto.randomUUID()}.${ext}`;
 
-    const blob = await put(filename, file, {
-      access: "public",
-      contentType: file.type || "application/octet-stream",
-    });
+      const blob = await put(filename, file, {
+        access: "public",
+        contentType: file.type || "application/octet-stream",
+      });
 
-    // --- DB INSERT ---
-    const id = crypto.randomUUID();
-    const createdAt = new Date();
+      // --- DB INSERT ---
+      const id = crypto.randomUUID();
+      const createdAt = new Date();
 
-    await db
-      .insert(wardrobe_items)
-      .values({
-        id,
-        userId,
-        imageUrl: blob.url,
-        createdAt,
-      })
-      .run();
+      await db
+        .insert(wardrobe_items)
+        .values({
+          id,
+          userId,
+          imageUrl: blob.url,
+          createdAt,
+        })
+        .run();
 
-    return NextResponse.json(
-      {
-        success: true,
-        id,
-        imageUrl: blob.url,
-      },
-      { status: 200 }
-    );
-  } catch (err) {
+      return NextResponse.json(
+        {
+          id,
+          imageUrl: blob.url,
+        },
+        { status: 200 }
+      );
+    } catch (err: any) {
+      // handle forbidden errors from blob storage or others
+      console.error("UPLOAD put or DB error", err);
+      const status = err?.status || err?.statusCode;
+      if (status === 403) {
+        return NextResponse.json(
+          { error: "Upload forbidden. Please log in again." },
+          { status: 403 }
+        );
+      }
+      return NextResponse.json(
+        { error: "Server error" },
+        { status: 500 }
+      );
+    }
+  } catch (err: any) {
     console.error("UPLOAD server error", err);
     return NextResponse.json(
-      { success: false, error: "Database error" },
+      { error: "Server error" },
       { status: 500 }
     );
   }
