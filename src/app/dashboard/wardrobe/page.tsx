@@ -61,7 +61,8 @@ export default function WardrobePage() {
         headers: {
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
-        body: formData,
+         credentials: "include",
+body: formData,
       });
 
       const text = await res.text();
