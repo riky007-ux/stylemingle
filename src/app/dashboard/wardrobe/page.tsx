@@ -33,6 +33,18 @@ export default function WardrobePage() {
   const handleUpload = async (file: File) => {
     if (!file) return;
     setError(null);
+
+    // Detect HEIC/HEIF formats and block with friendly message
+    const ext = file.name.split(".").pop()?.toLowerCase();
+    if (ext === "heic" || ext === "heif") {
+      setError("HEIC images aren’t supported yet — please choose JPG or PNG.");
+      // reset file input to avoid stale state
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+      return;
+    }
+
     try {
       const token =
         typeof window !== "undefined"
@@ -51,6 +63,7 @@ export default function WardrobePage() {
         },
         body: formData,
       });
+
       const text = await res.text();
       if (!res.ok) {
         let message = "Upload failed";
@@ -81,6 +94,11 @@ export default function WardrobePage() {
       }
     } catch (err: any) {
       setError(err.message || "Upload failed");
+    } finally {
+      // always reset the file input after upload attempt
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
     }
   };
 
@@ -116,6 +134,7 @@ export default function WardrobePage() {
         }
         throw new Error(message);
       }
+      // success message - using alert for now
       alert("Outfit generated successfully!");
     } catch (err: any) {
       alert(err.message || "Failed to generate outfit");
