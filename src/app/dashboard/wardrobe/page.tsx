@@ -1,5 +1,4 @@
 "use client";
-
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
@@ -33,7 +32,6 @@ export default function WardrobePage() {
   const handleUpload = async (file: File) => {
     if (!file) return;
     setError(null);
-
     // Detect HEIC/HEIF formats and block with friendly message
     const ext = file.name.split(".").pop()?.toLowerCase();
     if (ext === "heic" || ext === "heif") {
@@ -44,7 +42,6 @@ export default function WardrobePage() {
       }
       return;
     }
-
     try {
       const token =
         typeof window !== "undefined"
@@ -55,16 +52,14 @@ export default function WardrobePage() {
           : null;
       const formData = new FormData();
       formData.append("file", file);
-
       const res = await fetch("/api/wardrobe/upload", {
         method: "POST",
         headers: {
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
-         credentials: "include",
-body: formData,
+        credentials: "include",
+        body: formData,
       });
-
       const text = await res.text();
       if (!res.ok) {
         let message = "Upload failed";
@@ -112,7 +107,6 @@ body: formData,
             window.localStorage.getItem("jwt") ||
             window.localStorage.getItem("stylemingle_token")
           : null;
-
       const body = { itemIds: items.map((item) => item.id) };
       const res = await fetch("/api/outfits/generate", {
         method: "POST",
@@ -189,7 +183,13 @@ body: formData,
       {items.length === 0 ? (
         <p>Your wardrobe is empty. Start by uploading your first item.</p>
       ) : (
-        <div style={{ display: "flex", gap: "12px", marginTop: "12px" }}>
+        <div
+          style={{
+            display: "flex",
+            gap: "12px",
+            marginTop: "12px",
+          }}
+        >
           {items.map((item) => (
             <img
               key={item.id}
