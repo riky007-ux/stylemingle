@@ -77,18 +77,13 @@ export async function POST(req: Request) {
         id,
         userId,
         imageUrl: blob.url,
-        category: "unknown",
-        color: "unknown",
-        style: "unknown",
-        season: "unknown",
-        notes: null,
         createdAt,
-      });
+      }).run();
     } catch (err) {
       console.error("UPLOAD: db insert failed", err);
       return NextResponse.json(
-        { success: false, error: "Database error" },
-        { status: 500 }
+        { success: false, error: "Database insert failed" },
+        { status: 400 }
       );
     }
 
