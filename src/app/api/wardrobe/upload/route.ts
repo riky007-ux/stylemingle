@@ -10,14 +10,12 @@ import crypto from "crypto";
 
 export async function POST(req: Request) {
   try {
-    console.log("UPLOAD: start");
-
-    // --- AUTH (never throw) ---
+    // --- AUTH ---
     let userId: string | null = null;
     try {
       userId = getUserIdFromAuthHeader(req.headers);
     } catch (err) {
-      console.error("UPLOAD: auth parse failed", err);
+      console.error("UPLOAD auth parse failed", err);
       return NextResponse.json(
         { success: false, error: "Unauthorized" },
         { status: 401 }
@@ -25,80 +23,71 @@ export async function POST(req: Request) {
     }
 
     if (!userId) {
-      return NextResponse.json(
-        { success: false, error: "Unauthorized" },
-        { status: 401 }
-      );
+      return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
     }
 
     // --- FORM DATA ---
-    let formData: FormData;
-    try {
-      formData = await req.formData();
-    } catch (err) {
-      console.error("UPLOAD: formData parse failed", err);
+    const formData = await req.formData();
+    const file = formData.get("file") as File | null;
+
+    const MAX_SIZE_BYTES = 10 * 1024 * 1024; // 10MB
+
+    if (!file) {
       return NextResponse.json(
-        { success: false, error: "Invalid form data" },
+        { success: false, error: "No file provided" },
         { status: 400 }
       );
     }
 
-    const file = formData.get("file");
-
-    if (!(file instanceof File)) {
+    if (file.size > MAX_SIZE_BYTES) {
       return NextResponse.json(
-        { success: false, error: "File missing" },
-        { status: 400 }
+        {
+          success: false,
+          error: "Image too large. Please choose a photo under 10 MB.",
+        },
+        { status: 413 }
       );
     }
 
     // --- BLOB UPLOAD ---
-    const filename = crypto.randomUUID();
-    let blob;
-    try {
-      blob = await put(filename, file, {
-        access: "public",
-        contentType: file.type || "application/octet-stream",
-      });
-    } catch (err) {
-      console.error("UPLOAD: blob upload failed", err);
-      return NextResponse.json(
-        { success: false, error: "Upload failed" },
-        { status: 500 }
-      );
-    }
+    const ext =
+      file.type && file.type.includes("/")
+        ? file.type.split("/")[1]
+        : "jpg";
 
-    // --- DB INSERT (explicit, unbreakable) ---
+    const filename = `${crypto.randomUUID()}.${ext}`;
+
+    const blob = await put(filename, file, {
+      access: "public",
+      contentType: file.type || "application/octet-stream",
+    });
+
+    // --- DB INSERT ---
     const id = crypto.randomUUID();
     const createdAt = new Date();
 
-    try {
-      await db.insert(wardrobe_items).values({
+    await db
+      .insert(wardrobe_items)
+      .values({
         id,
         userId,
         imageUrl: blob.url,
         createdAt,
-      }).run();
-    } catch (err) {
-      console.error("UPLOAD: db insert failed", err);
-      return NextResponse.json(
-        { success: false, error: "Database insert failed" },
-        { status: 400 }
-      );
-    }
+      })
+      .run();
 
-    console.log("UPLOAD: success");
-
-    // --- SAFE RESPONSE ---
-    return NextResponse.json({
-      success: true,
-      id,
-      imageUrl: blob.url,
-    });
-  } catch (err) {
-    console.error("UPLOAD: fatal error", err);
     return NextResponse.json(
-      { success: false, error: "Internal upload error" },
+      {
+        success: true,
+        id,
+        imageUrl: blob.url,
+      },
+      { status: 200 }
+    );
+  } catch (err) {
+    console.error("UPLOAD server error", err);
+    return NextResponse.json(
+      { success: false, error: "Database error" },
       { status: 500 }
     );
   }
