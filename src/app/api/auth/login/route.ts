@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 import { db } from "@/lib/db";
@@ -15,8 +16,11 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Email and password required" }, { status: 400 });
     }
 
-    // lookup user
-    const existing = await db.select().from(users).where(eq(users.email, email)).limit(1);
+    const existing = await db
+      .select()
+      .from(users)
+      .where(eq(users.email, email))
+      .limit(1);
 
     if (existing.length === 0) {
       return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
@@ -30,6 +34,13 @@ export async function POST(request: Request) {
     }
 
     const token = jwt.sign({ userId: user.id }, SECRET, { expiresIn: "7d" });
+
+    // Set auth cookie
+    cookies().set("auth", token, {
+      path: "/",
+      httpOnly: true,
+      sameSite: "lax",
+    });
 
     return NextResponse.json({ token });
   } catch (err) {
