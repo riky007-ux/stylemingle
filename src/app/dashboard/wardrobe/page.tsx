@@ -2,10 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
-type WardrobeItem = {
-  id: string;
-  imageUrl: string;
-};
+type WardrobeItem = { id: string; imageUrl: string; };
 
 export default function WardrobePage() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -13,30 +10,31 @@ export default function WardrobePage() {
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
 
-  useEffect(() => {
-    const fetchItems = async () => {
-      try {
-        const res = await fetch("/api/wardrobe");
-        if (!res.ok) {
-          throw new Error("Failed to fetch wardrobe items");
-        }
-        const data = await res.json();
-        setItems(data.items || []);
-      } catch (err: any) {
-        console.error(err);
+  const fetchItems = async () => {
+    try {
+      const res = await fetch("/api/wardrobe/items");
+      if (!res.ok) {
+        throw new Error("Failed to fetch wardrobe items");
       }
-    };
+      const data = await res.json();
+      setItems(data.items || []);
+    } catch (err: any) {
+      console.error(err);
+      setError("Failed to fetch wardrobe items");
+    }
+  };
+
+  useEffect(() => {
     fetchItems();
   }, []);
 
   const handleUpload = async (file: File) => {
     if (!file) return;
     setError(null);
-    // Detect HEIC/HEIF formats and block with friendly message
-    const ext = file.name.split(".").pop()?.toLowerCase();
-    if (ext === "heic" || ext === "heif") {
-      setError("HEIC images aren’t supported yet — please choose JPG or PNG.");
-      // reset file input to avoid stale state
+
+    // size guard 10MB
+    if (file.size > 10 * 1024 * 1024) {
+      setError("Image too large. Please upload a smaller image.");
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
       }
@@ -76,22 +74,14 @@ export default function WardrobePage() {
         }
         throw new Error(message);
       } else {
-        let parsed: any = {};
-        if (text) {
-          try {
-            parsed = JSON.parse(text);
-          } catch {
-            // ignore parse errors
-          }
-        }
-        if (parsed && parsed.item) {
-          setItems((prev) => [...prev, parsed.item]);
-        }
+        // parse if needed
+        // After successful upload, refresh wardrobe list from correct endpoint
+        await fetchItems();
       }
     } catch (err: any) {
       setError(err.message || "Upload failed");
     } finally {
-      // always reset the file input after upload attempt
+      // reset file input after upload attempt
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
       }
