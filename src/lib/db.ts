@@ -4,14 +4,16 @@ import { drizzle } from 'drizzle-orm/libsql';
 const url = process.env.TURSO_DATABASE_URL;
 const authToken = process.env.TURSO_AUTH_TOKEN;
 
-if (!url) {
-  throw new Error('TURSO_DATABASE_URL is missing');
-}
-if (!authToken) {
-  throw new Error('TURSO_AUTH_TOKEN is missing');
+// During static builds, env vars might be missing. Avoid throwing here.
+let db: any;
+
+if (url && authToken) {
+  const client = createClient({ url, authToken });
+  db = drizzle(client);
+} else {
+  console.warn('TURSO_DATABASE_URL or TURSO_AUTH_TOKEN is missing; database client disabled.');
+  db = undefined;
 }
 
-const client = createClient({ url, authToken });
-
-export const db = drizzle(client);
+export { db };
 export default db;
