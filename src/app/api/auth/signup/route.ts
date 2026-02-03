@@ -24,7 +24,7 @@ export async function POST(request: Request) {
       passwordHash,
       createdAt: new Date(),
     });
-    const token = signToken({ userId });
+    const token = signToken(userId);
     const res = NextResponse.json({ token }, { status: 200 });
     res.cookies.set(AUTH_COOKIE_NAME, token, getCookieOptions());
     return res;
