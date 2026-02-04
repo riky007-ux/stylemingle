@@ -1,35 +1,33 @@
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-import { NextResponse } from "next/server";
+import { NextResponse, NextRequest } from "next/server";
 import { db } from "@/lib/db";
 import { wardrobe_items } from "@/lib/schema";
-import { getUserIdFromAuthHeader } from "@/lib/auth";
+import { getUserIdFromAuthHeader, AUTH_COOKIE_NAME, verifyToken } from "@/lib/auth";
 import { put } from "@vercel/blob";
 import crypto from "crypto";
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
     // --- AUTH ---
-    let userId: string | null = null;
-    try {
-      userId = getUserIdFromAuthHeader(req.headers);
-    } catch (err) {
-      console.error("UPLOAD auth parse failed", err);
+    let userId: string | null = getUserIdFromAuthHeader(req.headers);
+    if (!userId) {
+      const cookieValue = req.cookies.get(AUTH_COOKIE_NAME)?.value;
+      if (cookieValue) {
+        userId = verifyToken(cookieValue);
+      }
+    }
+    if (!userId) {
       return NextResponse.json(
         { success: false, error: "Unauthorized" },
         { status: 401 }
       );
     }
 
-    if (!userId) {
-      return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
-    }
-
     // --- FORM DATA ---
     const formData = await req.formData();
     const file = formData.get("file") as File | null;
-
     const MAX_SIZE_BYTES = 10 * 1024 * 1024; // 10MB
 
     if (!file) {
@@ -56,38 +54,24 @@ export async function POST(req: Request) {
         : "jpg";
 
     const filename = `${crypto.randomUUID()}.${ext}`;
-
     const blob = await put(filename, file, {
       access: "public",
-      contentType: file.type || "application/octet-stream",
     });
 
-    // --- DB INSERT ---
-    const id = crypto.randomUUID();
-    const createdAt = new Date();
+    // Save to DB
+    await db.insert(wardrobe_items).values({
+      name: filename,
+      url: blob.url,
+      size: file.size,
+      user_id: userId,
+      type: file.type,
+    });
 
-    await db
-      .insert(wardrobe_items)
-      .values({
-        id,
-        userId,
-        imageUrl: blob.url,
-        createdAt,
-      })
-      .run();
-
-    return NextResponse.json(
-      {
-        success: true,
-        id,
-        imageUrl: blob.url,
-      },
-      { status: 200 }
-    );
+    return NextResponse.json({ success: true, url: blob.url });
   } catch (err) {
-    console.error("UPLOAD server error", err);
+    console.error("UPLOAD error", err);
     return NextResponse.json(
-      { success: false, error: "Database error" },
+      { success: false, error: "Upload error" },
       { status: 500 }
     );
   }
