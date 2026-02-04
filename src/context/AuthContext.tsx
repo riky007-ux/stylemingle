@@ -1,12 +1,6 @@
 "use client";
 
-import React, {
-  createContext,
-  useContext,
-  useState,
-  useEffect,
-  ReactNode,
-} from "react";
+import React, { createContext, useContext, useEffect, useState, ReactNode } from "react";
 
 interface AuthContextValue {
   isAuthenticated: boolean;
@@ -20,26 +14,22 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
 
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      const token =
-        localStorage.getItem("token") ||
-        localStorage.getItem("authToken");
-
-      setIsAuthenticated(!!token);
-    }
+    if (typeof window === "undefined") return;
+    const token = localStorage.getItem("token") || localStorage.getItem("authToken");
+    setIsAuthenticated(!!token);
   }, []);
 
   const login = (token: string) => {
     // Canonical token key (used by API calls)
     localStorage.setItem("token", token);
-
-    // Backward compatibility (existing logic)
+    // Backward compatibility
     localStorage.setItem("authToken", token);
-
     setIsAuthenticated(true);
   };
 
   const logout = () => {
+    // Clear server-side httpOnly cookie (best-effort)
+    fetch("/api/auth/logout", { method: "POST" }).catch(() => {});
     localStorage.removeItem("token");
     localStorage.removeItem("authToken");
     setIsAuthenticated(false);
