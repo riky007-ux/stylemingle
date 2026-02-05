@@ -40,7 +40,7 @@ export async function POST(req: NextRequest) {
     const formData = await req.formData();
     const file = formData.get("file") as File | null;
 
-    const MAX_SIZE_BYTES = 10 * 1024 * 1024;
+    const MAX_SIZE_BYTES = 10 * 1024 * 1024; // 10MB
 
     if (!file) {
       return NextResponse.json(
@@ -70,9 +70,9 @@ export async function POST(req: NextRequest) {
     const id = crypto.randomUUID();
     const createdAt = new Date();
 
-    // 🔑 Explicit snake_case insert for Postgres
-    await db.execute(sql`
-      insert into wardrobe_items (id, user_id, image_url, created_at)
+    // ✅ Correct for LibSQL + your schema (camelCase columns)
+    await db.run(sql`
+      insert into wardrobe_items ("id", "userId", "imageUrl", "createdAt")
       values (${id}, ${userId}, ${blob.url}, ${createdAt})
     `);
 
