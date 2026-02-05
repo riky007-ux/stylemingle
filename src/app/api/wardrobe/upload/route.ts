@@ -4,9 +4,9 @@ export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { put } from "@vercel/blob";
 import crypto from "crypto";
+import { sql } from "drizzle-orm";
 
 import { db } from "@/lib/db";
-import { wardrobe_items } from "@/lib/schema";
 import {
   AUTH_COOKIE_NAME,
   getUserIdFromAuthHeader,
@@ -18,11 +18,9 @@ function normalizeToken(raw: string) {
 }
 
 function getUserId(req: NextRequest): string | null {
-  // 1) Authorization header
   const fromHeader = getUserIdFromAuthHeader(req.headers);
   if (fromHeader) return fromHeader;
 
-  // 2) Cookie fallback
   const cookie = req.cookies.get(AUTH_COOKIE_NAME);
   if (!cookie?.value) return null;
 
@@ -42,7 +40,7 @@ export async function POST(req: NextRequest) {
     const formData = await req.formData();
     const file = formData.get("file") as File | null;
 
-    const MAX_SIZE_BYTES = 10 * 1024 * 1024; // 10MB
+    const MAX_SIZE_BYTES = 10 * 1024 * 1024;
 
     if (!file) {
       return NextResponse.json(
@@ -58,10 +56,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const ext =
-      file.type && file.type.includes("/")
-        ? file.type.split("/")[1]
-        : "jpg";
+    const ext = file.type?.includes("/")
+      ? file.type.split("/")[1]
+      : "jpg";
 
     const filename = `${crypto.randomUUID()}.${ext}`;
 
@@ -73,12 +70,11 @@ export async function POST(req: NextRequest) {
     const id = crypto.randomUUID();
     const createdAt = new Date();
 
-    await db.insert(wardrobe_items).values({
-      id,
-      userId,
-      imageUrl: blob.url,
-      createdAt,
-    });
+    // 🔑 Explicit snake_case insert for Postgres
+    await db.execute(sql`
+      insert into wardrobe_items (id, user_id, image_url, created_at)
+      values (${id}, ${userId}, ${blob.url}, ${createdAt})
+    `);
 
     return NextResponse.json(
       { success: true, id, imageUrl: blob.url },
