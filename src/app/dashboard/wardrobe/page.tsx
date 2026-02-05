@@ -1,23 +1,71 @@
 "use client";
+
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useAuth } from "../../../context/AuthContext";
 
-type WardrobeItem = { id: string; imageUrl: string; };
+type WardrobeItem = { id: string; imageUrl: string };
+
+function getToken(): string | null {
+  if (typeof window === "undefined") return null;
+  return (
+    window.localStorage.getItem("token") ||
+    window.localStorage.getItem("authToken") ||
+    window.localStorage.getItem("jwt") ||
+    window.localStorage.getItem("stylemingle_token")
+  );
+}
+
+async function readErrorMessage(res: Response, fallback: string) {
+  const text = await res.text();
+  if (!text) return fallback;
+
+  // Try JSON first
+  try {
+    const data = JSON.parse(text);
+    return (data && (data.error || data.message)) || fallback;
+  } catch {
+    // Otherwise plain text/HTML
+    return text;
+  }
+}
 
 export default function WardrobePage() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [items, setItems] = useState<WardrobeItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
+  const { logout } = useAuth();
 
   const fetchItems = async () => {
     try {
-      const res = await fetch("/api/wardrobe/items");
+      setError(null);
+      const token = getToken();
+
+      const res = await fetch("/api/wardrobe/items", {
+        method: "GET",
+        credentials: "include",
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+
+      if (res.status === 401) {
+        logout();
+        router.push("/login");
+        return;
+      }
+
       if (!res.ok) {
         throw new Error("Failed to fetch wardrobe items");
       }
+
       const data = await res.json();
-      setItems(data.items || []);
+      // items route returns an array, but be defensive
+      const nextItems: WardrobeItem[] = Array.isArray(data)
+        ? data
+        : data?.items || [];
+      setItems(nextItems);
     } catch (err: any) {
       console.error(err);
       setError("Failed to fetch wardrobe items");
@@ -26,78 +74,64 @@ export default function WardrobePage() {
 
   useEffect(() => {
     fetchItems();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleUpload = async (file: File) => {
     if (!file) return;
     setError(null);
 
-    // size guard 10MB
+    // client-side size guard (10MB)
     if (file.size > 10 * 1024 * 1024) {
       setError("Image too large. Please upload a smaller image.");
-      if (fileInputRef.current) {
-        fileInputRef.current.value = "";
-      }
+      if (fileInputRef.current) fileInputRef.current.value = "";
       return;
     }
+
     try {
-      const token =
-        typeof window !== "undefined"
-          ? window.localStorage.getItem("token") ||
-            window.localStorage.getItem("authToken") ||
-            window.localStorage.getItem("jwt") ||
-            window.localStorage.getItem("stylemingle_token")
-          : null;
+      const token = getToken();
       const formData = new FormData();
       formData.append("file", file);
+
       const res = await fetch("/api/wardrobe/upload", {
         method: "POST",
+        credentials: "include",
         headers: {
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
-        credentials: "include",
         body: formData,
       });
-      const text = await res.text();
+
+      if (res.status === 401) {
+        logout();
+        router.push("/login");
+        return;
+      }
+
       if (!res.ok) {
-        let message = "Upload failed";
-        if (text) {
-          try {
-            const data = JSON.parse(text);
-            message = (data && (data.error || data.message)) || message;
-          } catch {
-            message = text;
-          }
-        }
+        let message = await readErrorMessage(res, "Upload failed");
         if (res.status === 413) {
           message = "Image too large. Please upload a smaller image.";
         }
         throw new Error(message);
-      } else {
-        // parse if needed
-        // After successful upload, refresh wardrobe list from correct endpoint
-        await fetchItems();
       }
+
+      // Some implementations return {success:true, imageUrl/url...}
+      // We don't need to parse it strictly; we just refresh.
+      await fetchItems();
     } catch (err: any) {
       setError(err.message || "Upload failed");
     } finally {
-      // reset file input after upload attempt
-      if (fileInputRef.current) {
-        fileInputRef.current.value = "";
-      }
+      // always reset file input after upload attempt
+      if (fileInputRef.current) fileInputRef.current.value = "";
     }
   };
 
   const handleGenerateOutfit = async () => {
     try {
-      const token =
-        typeof window !== "undefined"
-          ? window.localStorage.getItem("token") ||
-            window.localStorage.getItem("authToken") ||
-            window.localStorage.getItem("jwt") ||
-            window.localStorage.getItem("stylemingle_token")
-          : null;
+      const token = getToken();
       const body = { itemIds: items.map((item) => item.id) };
+
       const res = await fetch("/api/outfits/generate", {
         method: "POST",
         headers: {
@@ -106,20 +140,18 @@ export default function WardrobePage() {
         },
         body: JSON.stringify(body),
       });
-      const text = await res.text();
+
+      if (res.status === 401) {
+        logout();
+        router.push("/login");
+        return;
+      }
+
       if (!res.ok) {
-        let message = "Failed to generate outfit";
-        if (text) {
-          try {
-            const data = JSON.parse(text);
-            message = (data && (data.error || data.message)) || message;
-          } catch {
-            message = text;
-          }
-        }
+        const message = await readErrorMessage(res, "Failed to generate outfit");
         throw new Error(message);
       }
-      // success message - using alert for now
+
       alert("Outfit generated successfully!");
     } catch (err: any) {
       alert(err.message || "Failed to generate outfit");
@@ -147,6 +179,7 @@ export default function WardrobePage() {
         >
           Go to Avatar
         </button>
+
         <button
           type="button"
           onClick={handleGenerateOutfit}
@@ -160,6 +193,7 @@ export default function WardrobePage() {
           Generate Outfit
         </button>
       </div>
+
       <input
         ref={fileInputRef}
         type="file"
@@ -169,17 +203,13 @@ export default function WardrobePage() {
           if (file) handleUpload(file);
         }}
       />
+
       {error && <p style={{ color: "red" }}>{error}</p>}
+
       {items.length === 0 ? (
         <p>Your wardrobe is empty. Start by uploading your first item.</p>
       ) : (
-        <div
-          style={{
-            display: "flex",
-            gap: "12px",
-            marginTop: "12px",
-          }}
-        >
+        <div style={{ display: "flex", gap: "12px", marginTop: "12px" }}>
           {items.map((item) => (
             <img
               key={item.id}
