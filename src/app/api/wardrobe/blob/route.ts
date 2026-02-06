@@ -1,43 +1,45 @@
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
-
-import { NextRequest, NextResponse } from "next/server";
 import { handleUpload } from "@vercel/blob/client";
-import { AUTH_COOKIE_NAME, getUserIdFromAuthHeader, verifyToken } from "@/lib/auth";
+import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
+import { AUTH_COOKIE_NAME, verifyToken } from "@/lib/auth";
 
-function normalizeToken(raw: string) {
-  return raw.startsWith("Bearer ") ? raw.slice(7) : raw;
-}
+export async function POST(request: Request) {
+  // 🔐 Auth check (cookie-based, aligned with repo)
+  const token = cookies().get(AUTH_COOKIE_NAME)?.value;
 
-function getUserId(req: NextRequest): string | null {
-  const fromHeader = getUserIdFromAuthHeader(req.headers);
-  if (fromHeader) return fromHeader;
+  if (!token) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
 
-  const cookie = req.cookies.get(AUTH_COOKIE_NAME);
-  if (!cookie?.value) return null;
+  const userId = verifyToken(token);
 
-  return verifyToken(normalizeToken(cookie.value));
-}
+  if (!userId) {
+    return NextResponse.json({ error: "Invalid token" }, { status: 401 });
+  }
 
-export async function POST(req: NextRequest) {
-  return handleUpload({
-    request: req,
-    onBeforeGenerateToken: async () => {
-      const userId = getUserId(req);
-      if (!userId) {
-        throw new NextResponse(JSON.stringify({ error: "Unauthorized" }), { status: 401 });
-      }
+  // ✅ IMPORTANT: this handleUpload signature requires body + request
+  const body = await request.json();
+
+  const result = await handleUpload({
+    request,
+    body,
+    onBeforeGenerateToken: async (_pathname, _clientPayload, _multipart) => {
       return {
         allowedContentTypes: [
           "image/jpeg",
           "image/png",
           "image/webp",
           "image/heic",
-          "image/heif",
         ],
-        maximumSizeInBytes: 25 * 1024 * 1024,
+        // tokenPayload MUST be a string
         tokenPayload: JSON.stringify({ userId }),
       };
     },
+    onUploadCompleted: async () => {
+      // no-op: DB insert happens client-side via /api/wardrobe/items
+    },
   });
+
+  // ✅ App Router requires a Response
+  return NextResponse.json(result);
 }
