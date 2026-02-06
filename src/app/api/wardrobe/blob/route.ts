@@ -20,18 +20,13 @@ function getUserId(req: NextRequest): string | null {
 }
 
 export async function POST(req: NextRequest) {
-  const userId = getUserId(req);
-  if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const body = await req.json();
-
-  // handleUpload returns a Response
   return handleUpload({
-    body,
     request: req,
     onBeforeGenerateToken: async () => {
+      const userId = getUserId(req);
+      if (!userId) {
+        throw new NextResponse(JSON.stringify({ error: "Unauthorized" }), { status: 401 });
+      }
       return {
         allowedContentTypes: [
           "image/jpeg",
@@ -40,7 +35,7 @@ export async function POST(req: NextRequest) {
           "image/heic",
           "image/heif",
         ],
-        maximumSizeInBytes: 25 * 1024 * 1024, // 25MB
+        maximumSizeInBytes: 25 * 1024 * 1024,
         tokenPayload: JSON.stringify({ userId }),
       };
     },
