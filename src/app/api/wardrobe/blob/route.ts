@@ -6,32 +6,56 @@ import { AUTH_COOKIE_NAME, verifyToken } from "@/lib/auth";
 export async function POST(request: Request) {
   // 🔐 Auth check (cookie-based, aligned with repo)
   const token = cookies().get(AUTH_COOKIE_NAME)?.value;
-
   if (!token) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const userId = verifyToken(token);
-
   if (!userId) {
     return NextResponse.json({ error: "Invalid token" }, { status: 401 });
   }
 
-  // ✅ IMPORTANT: this handleUpload signature requires body + request
-  const body = await request.json();
+  // Parse body
+  let body: any;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  // ✅ Normalize to the envelope Vercel Blob expects:
+  // { type, payload: { pathname, clientPayload, multipart } }
+  if (body && !body.payload) {
+    // If caller sent flat fields, wrap them
+    if (body.pathname !== undefined) {
+      body = {
+        type: body.type ?? "blob.generate-client-token",
+        payload: {
+          pathname: body.pathname,
+          clientPayload: body.clientPayload ?? "",
+          multipart: body.multipart ?? false,
+        },
+      };
+    }
+
+    // If caller sent upload-completed in a flat shape, wrap that too
+    if (body.type === "blob.upload-completed" && body.blob !== undefined) {
+      body = {
+        type: body.type,
+        payload: {
+          blob: body.blob,
+          tokenPayload: body.tokenPayload,
+        },
+      };
+    }
+  }
 
   const result = await handleUpload({
     request,
     body,
     onBeforeGenerateToken: async (_pathname, _clientPayload, _multipart) => {
       return {
-        allowedContentTypes: [
-          "image/jpeg",
-          "image/png",
-          "image/webp",
-          "image/heic",
-        ],
-        // tokenPayload MUST be a string
+        allowedContentTypes: ["image/jpeg", "image/png", "image/webp", "image/heic"],
         tokenPayload: JSON.stringify({ userId }),
       };
     },
@@ -40,6 +64,5 @@ export async function POST(request: Request) {
     },
   });
 
-  // ✅ App Router requires a Response
   return NextResponse.json(result);
 }
