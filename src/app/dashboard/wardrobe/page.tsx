@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "../../../context/AuthContext";
+import { upload } from "@vercel/blob/client";
 
 type WardrobeItem = { id: string; imageUrl: string };
 
@@ -19,13 +20,10 @@ function getToken(): string | null {
 async function readErrorMessage(res: Response, fallback: string) {
   const text = await res.text();
   if (!text) return fallback;
-
-  // Try JSON first
   try {
     const data = JSON.parse(text);
     return (data && (data.error || data.message)) || fallback;
   } catch {
-    // Otherwise plain text/HTML
     return text;
   }
 }
@@ -61,10 +59,7 @@ export default function WardrobePage() {
       }
 
       const data = await res.json();
-      // items route returns an array, but be defensive
-      const nextItems: WardrobeItem[] = Array.isArray(data)
-        ? data
-        : data?.items || [];
+      const nextItems: WardrobeItem[] = Array.isArray(data) ? data : data?.items || [];
       setItems(nextItems);
     } catch (err: any) {
       console.error(err);
@@ -74,55 +69,39 @@ export default function WardrobePage() {
 
   useEffect(() => {
     fetchItems();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleUpload = async (file: File) => {
     if (!file) return;
     setError(null);
-
-    // client-side size guard (10MB)
-    if (file.size > 10 * 1024 * 1024) {
-      setError("Image too large. Please upload a smaller image.");
-      if (fileInputRef.current) fileInputRef.current.value = "";
-      return;
-    }
-
     try {
       const token = getToken();
-      const formData = new FormData();
-      formData.append("file", file);
-
-      const res = await fetch("/api/wardrobe/upload", {
+      const blob = await upload(file.name, file, {
+        access: "public",
+        handleUploadUrl: "/api/wardrobe/blob",
+      });
+      const res = await fetch("/api/wardrobe/items", {
         method: "POST",
         credentials: "include",
         headers: {
+          "Content-Type": "application/json",
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
-        body: formData,
+        body: JSON.stringify({ imageUrl: blob.url }),
       });
-
       if (res.status === 401) {
         logout();
         router.push("/login");
         return;
       }
-
       if (!res.ok) {
-        let message = await readErrorMessage(res, "Upload failed");
-        if (res.status === 413) {
-          message = "Image too large. Please upload a smaller image.";
-        }
+        const message = await readErrorMessage(res, "Upload failed");
         throw new Error(message);
       }
-
-      // Some implementations return {success:true, imageUrl/url...}
-      // We don't need to parse it strictly; we just refresh.
       await fetchItems();
     } catch (err: any) {
       setError(err.message || "Upload failed");
     } finally {
-      // always reset file input after upload attempt
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
   };
@@ -131,7 +110,6 @@ export default function WardrobePage() {
     try {
       const token = getToken();
       const body = { itemIds: items.map((item) => item.id) };
-
       const res = await fetch("/api/outfits/generate", {
         method: "POST",
         headers: {
@@ -140,18 +118,15 @@ export default function WardrobePage() {
         },
         body: JSON.stringify(body),
       });
-
       if (res.status === 401) {
         logout();
         router.push("/login");
         return;
       }
-
       if (!res.ok) {
         const message = await readErrorMessage(res, "Failed to generate outfit");
         throw new Error(message);
       }
-
       alert("Outfit generated successfully!");
     } catch (err: any) {
       alert(err.message || "Failed to generate outfit");
