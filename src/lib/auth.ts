@@ -4,9 +4,6 @@ export const AUTH_COOKIE_NAME = "auth";
 
 const SECRET = process.env.NEXTAUTH_SECRET || "";
 
-// NOTE: This throws at module import time if NEXTAUTH_SECRET isn't set.
-// That is expected in environments where auth routes are used without env,
-// but for local builds you must set NEXTAUTH_SECRET in .env.local.
 if (!SECRET) {
   throw new Error("Missing NEXTAUTH_SECRET");
 }
@@ -41,10 +38,20 @@ export function getUserIdFromAuthHeader(headers: Headers): string | null {
 }
 
 /**
- * Cookie-based auth (used by browser + curl cookie-jar flows).
- * Reads the JWT from the `auth` cookie and verifies it.
+ * Cookie-based auth for App Router route handlers and browser/curl cookie-jar flows.
+ * Works with NextRequest (req.cookies) and generic Request (cookie header).
  */
 export function getUserIdFromRequest(req: Request): string | null {
+  // NextRequest has a `cookies` accessor; use it when available.
+  const anyReq = req as any;
+  const cookieStore = anyReq?.cookies;
+  if (cookieStore && typeof cookieStore.get === "function") {
+    const v = cookieStore.get(AUTH_COOKIE_NAME)?.value;
+    if (!v) return null;
+    return verifyToken(v);
+  }
+
+  // Fallback: parse raw Cookie header.
   const cookieHeader = req.headers.get("cookie") || "";
   const match = cookieHeader.match(
     new RegExp(`(?:^|;\\s*)${AUTH_COOKIE_NAME}=([^;]+)`)
