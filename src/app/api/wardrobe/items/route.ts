@@ -1,63 +1,60 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
+import crypto from "crypto";
 import { db } from "@/lib/db";
-import { wardrobe_items } from "@/lib/schema";
-import { eq, desc } from "drizzle-orm";
-import { verifyToken, AUTH_COOKIE_NAME } from "@/lib/auth";
-import { randomUUID } from "crypto";
+import { AUTH_COOKIE_NAME, verifyToken } from "@/lib/auth";
 
-function normalizeToken(raw: string) {
-  return raw.startsWith("Bearer ") ? raw.slice(7) : raw;
+export async function GET() {
+  const token = cookies().get(AUTH_COOKIE_NAME)?.value;
+  if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const userId = verifyToken(token);
+  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  // Return newest first (safe even if table is small)
+  const rows = await db.execute({
+    sql: `select id, userId, imageUrl, createdAt
+          from wardrobe_items
+          where userId = ?
+          order by createdAt desc`,
+    args: [userId],
+  });
+
+  return NextResponse.json(rows.rows ?? []);
 }
 
-function getUserId(req: NextRequest): string | null {
-  const authHeader = req.headers.get("authorization") || req.headers.get("Authorization");
-  if (authHeader) {
-    const userId = verifyToken(normalizeToken(authHeader));
-    if (userId) return userId;
-  }
-  const cookie = req.cookies.get(AUTH_COOKIE_NAME);
-  if (cookie) {
-    const userId = verifyToken(normalizeToken(cookie.value));
-    if (userId) return userId;
-  }
-  return null;
-}
+export async function POST(request: Request) {
+  const token = cookies().get(AUTH_COOKIE_NAME)?.value;
+  if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-export async function GET(req: NextRequest) {
-  const userId = getUserId(req);
-  if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-  const items = await db
-    .select()
-    .from(wardrobe_items)
-    .where(eq(wardrobe_items.userId, userId))
-    .orderBy(desc(wardrobe_items.createdAt));
+  const userId = verifyToken(token);
+  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  return NextResponse.json(items, { status: 200 });
-}
-
-export async function POST(req: NextRequest) {
-  const userId = getUserId(req);
-  if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-  let body;
+  let body: any;
   try {
-    body = await req.json();
+    body = await request.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
-  const { imageUrl } = body ?? {};
+
+  const imageUrl = body?.imageUrl;
   if (!imageUrl || typeof imageUrl !== "string") {
-    return NextResponse.json({ error: "Invalid imageUrl" }, { status: 400 });
+    return NextResponse.json({ error: "Missing imageUrl" }, { status: 400 });
   }
-  const newItem = {
-    id: randomUUID(),
-    userId,
-    imageUrl,
-    createdAt: new Date(),
-  };
-  await db.insert(wardrobe_items).values(newItem);
-  return NextResponse.json(newItem, { status: 201 });
+
+  const id = crypto.randomUUID();
+  const createdAt = Math.floor(Date.now() / 1000);
+
+  try {
+    await db.execute({
+      sql: `insert into wardrobe_items (id, userId, imageUrl, createdAt)
+            values (?, ?, ?, ?)`,
+      args: [id, userId, imageUrl, createdAt],
+    });
+
+    return NextResponse.json({ id, userId, imageUrl, createdAt }, { status: 201 });
+  } catch (err) {
+    console.error("WARDROBE_ITEMS_INSERT_FAILED", err);
+    return NextResponse.json({ error: "Insert failed" }, { status: 500 });
+  }
 }
