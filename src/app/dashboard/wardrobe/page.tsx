@@ -8,6 +8,7 @@ import { upload } from "@vercel/blob/client";
 type WardrobeItem = {
   id: string;
   imageUrl: string;
+  createdAt?: string;
 };
 
 /**
@@ -16,6 +17,94 @@ type WardrobeItem = {
  */
 function safeUUID() {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function extractFilename(imageUrl: string) {
+  if (!imageUrl) return "";
+  try {
+    const url = new URL(imageUrl, "http://localhost");
+    const pathname = url.pathname || "";
+    const basename = pathname.split("/").pop() || "";
+    return decodeURIComponent(basename);
+  } catch {
+    return imageUrl;
+  }
+}
+
+function formatUploadDate(createdAt?: string) {
+  if (!createdAt) return "";
+  const d = new Date(createdAt);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+}
+
+function buildItemLabel(item: WardrobeItem) {
+  const file = extractFilename(item.imageUrl);
+  const date = formatUploadDate(item.createdAt);
+  const filePart = file ? file : "Wardrobe item";
+  return date ? `${filePart} • ${date}` : filePart;
+}
+
+function WardrobeItemCard({
+  item,
+  onDelete,
+}: {
+  item: WardrobeItem;
+  onDelete: (id: string) => Promise<void>;
+}) {
+  const [imageError, setImageError] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  const label = buildItemLabel(item);
+
+  return (
+    <div className="relative aspect-square overflow-hidden rounded border bg-zinc-100">
+      {imageError ? (
+        <div className="flex h-full flex-col items-center justify-center px-3 text-center text-sm text-zinc-600">
+          <div className="font-medium">Preview unavailable</div>
+          <div className="mt-1 text-xs text-zinc-500 break-words">{label}</div>
+        </div>
+      ) : (
+        <img
+          src={item.imageUrl}
+          alt={label}
+          className="h-full w-full object-cover"
+          onError={() => setImageError(true)}
+        />
+      )}
+
+      <button
+        type="button"
+        aria-label="Delete wardrobe item"
+        className="absolute right-2 top-2 rounded bg-red-600 px-2 py-1 text-xs font-semibold text-white shadow-sm transition hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-400 focus:ring-offset-1 disabled:cursor-not-allowed disabled:bg-red-400"
+        disabled={deleting}
+        onClick={async () => {
+          if (deleting) return;
+          if (typeof confirm === "function") {
+            const ok = confirm("Delete this wardrobe item?");
+            if (!ok) return;
+          }
+
+          setDeleting(true);
+          try {
+            await onDelete(item.id);
+          } finally {
+            setDeleting(false);
+          }
+        }}
+      >
+        Delete
+      </button>
+
+      <div className="pointer-events-none absolute bottom-0 left-0 right-0 bg-black/40 px-2 py-1">
+        <div className="truncate text-xs text-white">{label}</div>
+      </div>
+    </div>
+  );
 }
 
 export default function WardrobePage() {
@@ -41,6 +130,28 @@ export default function WardrobePage() {
   useEffect(() => {
     loadItems();
   }, []);
+
+  const handleDelete = async (id: string) => {
+    setError(null);
+
+    // Optimistic removal
+    setItems((prev) => prev.filter((item) => item.id !== id));
+
+    try {
+      const res = await fetch(`/api/wardrobe/items?id=${encodeURIComponent(id)}`, {
+        method: "DELETE",
+        credentials: "same-origin",
+      });
+
+      if (!res.ok) {
+        throw new Error("Failed to delete wardrobe item");
+      }
+    } catch (err) {
+      console.error(err);
+      setError("Delete failed");
+      await loadItems();
+    }
+  };
 
   async function handleUpload(file: File) {
     setError(null);
@@ -125,7 +236,7 @@ export default function WardrobePage() {
     <div className="p-6 max-w-5xl mx-auto">
       <h1 className="text-2xl font-semibold mb-4">Wardrobe</h1>
 
-      <p className="text-sm text-zinc-600 mb-4">
+      <p className="mb-4 text-sm text-zinc-600">
         Upload outfit pieces and manage your wardrobe.
       </p>
 
@@ -141,35 +252,18 @@ export default function WardrobePage() {
       />
 
       {uploadNotice && (
-        <div className="mt-2 text-sm text-zinc-600">
-          {uploadNotice}
-        </div>
+        <div className="mt-2 text-sm text-zinc-600">{uploadNotice}</div>
       )}
 
-      {error && (
-        <div className="mt-2 text-sm text-red-600">
-          {error}
-        </div>
-      )}
+      {error && <div className="mt-2 text-sm text-red-600">{error}</div>}
 
       {loading && (
-        <div className="mt-4 text-sm text-zinc-600">
-          Uploading…
-        </div>
+        <div className="mt-4 text-sm text-zinc-600">Uploading…</div>
       )}
 
-      <div className="mt-8 grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="mt-8 grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
         {items.map((item) => (
-          <div
-            key={item.id}
-            className="aspect-square overflow-hidden rounded border"
-          >
-            <img
-              src={item.imageUrl}
-              alt="Wardrobe item"
-              className="w-full h-full object-cover"
-            />
-          </div>
+          <WardrobeItemCard key={item.id} item={item} onDelete={handleDelete} />
         ))}
       </div>
     </div>
