@@ -5,7 +5,7 @@ import crypto from "crypto";
 import { db } from "@/lib/db";
 import { wardrobe_items } from "@/lib/schema";
 import { AUTH_COOKIE_NAME, verifyToken } from "@/lib/auth";
-import { eq, desc } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 
 /**
  * GET /api/wardrobe/items
@@ -85,5 +85,48 @@ export async function POST(request: Request) {
   } catch (err) {
     console.error("WARDROBE_ITEMS_INSERT_FAILED", err);
     return NextResponse.json({ error: "Insert failed" }, { status: 500 });
+  }
+}
+
+/**
+ * DELETE /api/wardrobe/items
+ * Deletes a wardrobe item owned by the authenticated user.
+ */
+export async function DELETE(request: Request) {
+  const token = cookies().get(AUTH_COOKIE_NAME)?.value;
+  if (!token) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const userId = verifyToken(token);
+  if (!userId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const url = new URL(request.url);
+  let id = url.searchParams.get("id");
+
+  if (!id) {
+    try {
+      const body: any = await request.json();
+      id = body?.id;
+    } catch {
+      // no body provided
+    }
+  }
+
+  if (!id || typeof id !== "string") {
+    return NextResponse.json({ error: "Missing id" }, { status: 400 });
+  }
+
+  try {
+    await db
+      .delete(wardrobe_items)
+      .where(and(eq(wardrobe_items.id, id), eq(wardrobe_items.userId, userId)));
+
+    return NextResponse.json({ success: true });
+  } catch (err) {
+    console.error("WARDROBE_ITEMS_DELETE_FAILED", err);
+    return NextResponse.json({ error: "Delete failed" }, { status: 500 });
   }
 }
