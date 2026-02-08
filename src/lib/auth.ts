@@ -36,3 +36,28 @@ export function getUserIdFromAuthHeader(headers: Headers): string | null {
   const token = auth.split(" ")[1];
   return verifyToken(token);
 }
+
+/**
+ * Cookie-based auth for App Router route handlers and browser/curl cookie-jar flows.
+ * Works with NextRequest (req.cookies) and generic Request (cookie header).
+ */
+export function getUserIdFromRequest(req: Request): string | null {
+  // NextRequest has a `cookies` accessor; use it when available.
+  const anyReq = req as any;
+  const cookieStore = anyReq?.cookies;
+  if (cookieStore && typeof cookieStore.get === "function") {
+    const v = cookieStore.get(AUTH_COOKIE_NAME)?.value;
+    if (!v) return null;
+    return verifyToken(v);
+  }
+
+  // Fallback: parse raw Cookie header.
+  const cookieHeader = req.headers.get("cookie") || "";
+  const match = cookieHeader.match(
+    new RegExp(`(?:^|;\\s*)${AUTH_COOKIE_NAME}=([^;]+)`)
+  );
+  if (!match) return null;
+
+  const token = decodeURIComponent(match[1]);
+  return verifyToken(token);
+}
