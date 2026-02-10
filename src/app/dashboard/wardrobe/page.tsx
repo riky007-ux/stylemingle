@@ -49,6 +49,21 @@ function buildItemLabel(item: WardrobeItem) {
   return date ? `${filePart} • ${date}` : filePart;
 }
 
+function buildThumbnailUrl(imageUrl: string) {
+  if (!imageUrl) return imageUrl;
+
+  try {
+    const url = new URL(imageUrl);
+    url.searchParams.set("w", "400");
+    url.searchParams.set("h", "400");
+    url.searchParams.set("fit", "cover");
+    url.searchParams.set("q", "75");
+    return url.toString();
+  } catch {
+    return `${imageUrl}${imageUrl.includes("?") ? "&" : "?"}w=400&h=400&fit=cover&q=75`;
+  }
+}
+
 function WardrobeItemCard({
   item,
   onDelete,
@@ -60,22 +75,29 @@ function WardrobeItemCard({
   const [deleting, setDeleting] = useState(false);
 
   const label = buildItemLabel(item);
+  const thumbnailUrl = buildThumbnailUrl(item.imageUrl);
 
   return (
-    <div className="relative aspect-square overflow-hidden rounded border bg-zinc-100">
-      {imageError ? (
-        <div className="flex h-full flex-col items-center justify-center px-3 text-center text-sm text-zinc-600">
-          <div className="font-medium">Preview unavailable</div>
-          <div className="mt-1 text-xs text-zinc-500 break-words">{label}</div>
-        </div>
-      ) : (
-        <img
-          src={item.imageUrl}
-          alt={label}
-          className="h-full w-full object-cover"
-          onError={() => setImageError(true)}
-        />
-      )}
+    <div className="relative overflow-hidden rounded border bg-zinc-100">
+      <div className="aspect-square w-full">
+        {imageError ? (
+          <div className="flex h-full w-full flex-col items-center justify-center px-3 text-center text-sm text-zinc-600">
+            <div className="font-medium">Preview unavailable</div>
+            <div className="mt-1 break-words text-xs text-zinc-500">{label}</div>
+          </div>
+        ) : (
+          <img
+            src={thumbnailUrl}
+            alt={label}
+            className="h-full w-full object-cover"
+            loading="lazy"
+            decoding="async"
+            draggable={false}
+            referrerPolicy="no-referrer"
+            onError={() => setImageError(true)}
+          />
+        )}
+      </div>
 
       <button
         type="button"
@@ -261,7 +283,7 @@ export default function WardrobePage() {
         <div className="mt-4 text-sm text-zinc-600">Uploading…</div>
       )}
 
-      <div className="mt-8 grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+      <div className="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 md:grid-cols-4 lg:grid-cols-5">
         {items.map((item) => (
           <WardrobeItemCard key={item.id} item={item} onDelete={handleDelete} />
         ))}
