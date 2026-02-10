@@ -3,7 +3,7 @@ import { cookies } from 'next/headers';
 import { eq, and } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
 
-import { verifyToken } from '@/lib/auth';
+import { AUTH_COOKIE_NAME, verifyToken } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { wardrobe_items } from '@/lib/schema';
 
@@ -11,7 +11,7 @@ import { wardrobe_items } from '@/lib/schema';
  * GET /api/wardrobe/items
  */
 export async function GET() {
-  const token = cookies().get('token')?.value;
+  const token = cookies().get(AUTH_COOKIE_NAME)?.value;
   if (!token) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
@@ -36,7 +36,7 @@ export async function GET() {
  * Schema requires id + userId + createdAt + imageUrl.
  */
 export async function POST(request: Request) {
-  const token = cookies().get('token')?.value;
+  const token = cookies().get(AUTH_COOKIE_NAME)?.value;
   if (!token) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
@@ -75,7 +75,7 @@ export async function POST(request: Request) {
  * DELETE /api/wardrobe/items
  */
 export async function DELETE(request: Request) {
-  const token = cookies().get('token')?.value;
+  const token = cookies().get(AUTH_COOKIE_NAME)?.value;
   if (!token) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
