@@ -107,8 +107,9 @@ function WardrobeItemCard({
         <Image
           src={thumbnailUrl}
           alt={label}
-          fill
-          className="pointer-events-none object-cover"
+          width={400}
+          height={400}
+          className="h-full w-full object-cover pointer-events-none"
           sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
           loading="lazy"
           referrerPolicy="no-referrer"
