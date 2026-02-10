@@ -1,86 +1,102 @@
-import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
-import { desc, eq, and } from "drizzle-orm";
+import { NextResponse } from 'next/server';
+import { cookies } from 'next/headers';
+import { eq, and } from 'drizzle-orm';
+import { randomUUID } from 'crypto';
 
-import { db } from "@/lib/db";
-import { wardrobe_items } from "@/lib/schema";
-import { AUTH_COOKIE_NAME, verifyToken } from "@/lib/auth";
-
-/**
- * Derives a public, cacheable thumbnail URL from a Vercel Blob image URL.
- * Uses Vercel Blob image transforms (edge-optimized).
- */
-function getThumbnailUrl(imageUrl: string): string {
-  try {
-    const url = new URL(imageUrl);
-    url.searchParams.set("w", "400");
-    url.searchParams.set("h", "400");
-    url.searchParams.set("fit", "cover");
-    url.searchParams.set("q", "75");
-    return url.toString();
-  } catch {
-    return imageUrl;
-  }
-}
+import { verifyToken } from '@/lib/auth';
+import { db } from '@/lib/db';
+import { wardrobe_items } from '@/lib/schema';
 
 /**
  * GET /api/wardrobe/items
- *
- * Returns all wardrobe items for the authenticated user.
- * Adds a derived `thumbnailUrl` for safe, cross-browser rendering.
  */
 export async function GET() {
-  const token = cookies().get(AUTH_COOKIE_NAME)?.value;
-
+  const token = cookies().get('token')?.value;
   if (!token) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   const userId = verifyToken(token);
   if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const rows = await db
-    .select({
-      id: wardrobe_items.id,
-      userId: wardrobe_items.userId,
-      imageUrl: wardrobe_items.imageUrl,
-      createdAt: wardrobe_items.createdAt,
-    })
+  const items = await db
+    .select()
     .from(wardrobe_items)
-    .where(eq(wardrobe_items.userId, userId))
-    .orderBy(desc(wardrobe_items.createdAt));
+    .where(eq(wardrobe_items.userId, userId));
 
-  const response = rows.map((item) => ({
-    ...item,
-    thumbnailUrl: getThumbnailUrl(item.imageUrl),
-  }));
+  return NextResponse.json(items);
+}
 
-  return NextResponse.json(response);
+/**
+ * POST /api/wardrobe/items
+ *
+ * Persists a newly uploaded wardrobe item.
+ * Schema requires id + userId + createdAt + imageUrl.
+ */
+export async function POST(request: Request) {
+  const token = cookies().get('token')?.value;
+  if (!token) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  const userId = verifyToken(token);
+  if (!userId) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  let body: any;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: 'Invalid body' }, { status: 400 });
+  }
+
+  const { imageUrl } = body ?? {};
+  if (!imageUrl) {
+    return NextResponse.json({ error: 'Missing imageUrl' }, { status: 400 });
+  }
+
+  const [item] = await db
+    .insert(wardrobe_items)
+    .values({
+      id: randomUUID(),
+      userId,
+      createdAt: new Date(),
+      imageUrl,
+    })
+    .returning();
+
+  return NextResponse.json(item);
 }
 
 /**
  * DELETE /api/wardrobe/items
- *
- * Deletes a wardrobe item owned by the authenticated user.
  */
 export async function DELETE(request: Request) {
-  const token = cookies().get(AUTH_COOKIE_NAME)?.value;
-
+  const token = cookies().get('token')?.value;
   if (!token) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   const userId = verifyToken(token);
   if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const { id } = await request.json();
+  const url = new URL(request.url);
+  let id = url.searchParams.get('id');
 
   if (!id) {
-    return NextResponse.json({ error: "Missing id" }, { status: 400 });
+    try {
+      const body = await request.json();
+      id = body?.id;
+    } catch {}
+  }
+
+  if (!id) {
+    return NextResponse.json({ error: 'Missing id' }, { status: 400 });
   }
 
   await db
