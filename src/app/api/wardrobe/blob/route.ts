@@ -58,7 +58,7 @@ export async function POST(request: Request) {
     }
   }
 
-  const result = await handleUpload({
+  const uploadHandlerArgs = {
     request,
     body,
     onBeforeGenerateToken: async (_pathname, _clientPayload, _multipart) => {
@@ -74,7 +74,17 @@ export async function POST(request: Request) {
     onUploadCompleted: async () => {
       // no-op: DB insert happens client-side via /api/wardrobe/items
     },
-  });
+  };
 
+  if (eventType === "blob.upload-completed") {
+    try {
+      const result = await handleUpload(uploadHandlerArgs);
+      return NextResponse.json(result);
+    } catch {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+  }
+
+  const result = await handleUpload(uploadHandlerArgs);
   return NextResponse.json(result);
 }
