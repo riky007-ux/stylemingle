@@ -1,19 +1,37 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import crypto from "crypto";
+import { desc, eq, and } from "drizzle-orm";
 
 import { db } from "@/lib/db";
 import { wardrobe_items } from "@/lib/schema";
 import { AUTH_COOKIE_NAME, verifyToken } from "@/lib/auth";
-import { and, desc, eq } from "drizzle-orm";
+
+/**
+ * Derives a public, cacheable thumbnail URL from a Vercel Blob image URL.
+ * Uses Vercel Blob image transforms (edge-optimized).
+ */
+function getThumbnailUrl(imageUrl: string): string {
+  try {
+    const url = new URL(imageUrl);
+    url.searchParams.set("w", "400");
+    url.searchParams.set("h", "400");
+    url.searchParams.set("fit", "cover");
+    url.searchParams.set("q", "75");
+    return url.toString();
+  } catch {
+    return imageUrl;
+  }
+}
 
 /**
  * GET /api/wardrobe/items
- * Return ONLY columns that are confirmed to exist in the actual Turso table.
- * (The DB does NOT have wardrobe metadata columns like category/color/style/etc.)
+ *
+ * Returns all wardrobe items for the authenticated user.
+ * Adds a derived `thumbnailUrl` for safe, cross-browser rendering.
  */
 export async function GET() {
   const token = cookies().get(AUTH_COOKIE_NAME)?.value;
+
   if (!token) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -34,66 +52,22 @@ export async function GET() {
     .where(eq(wardrobe_items.userId, userId))
     .orderBy(desc(wardrobe_items.createdAt));
 
-  return NextResponse.json(rows);
-}
+  const response = rows.map((item) => ({
+    ...item,
+    thumbnailUrl: getThumbnailUrl(item.imageUrl),
+  }));
 
-/**
- * POST /api/wardrobe/items
- * Persist a wardrobe item using a Blob image URL.
- * Insert ONLY the columns that exist in the actual table.
- */
-export async function POST(request: Request) {
-  const token = cookies().get(AUTH_COOKIE_NAME)?.value;
-  if (!token) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const userId = verifyToken(token);
-  if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  let body: any;
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
-  }
-
-  const imageUrl = body?.imageUrl;
-  if (!imageUrl || typeof imageUrl !== "string") {
-    return NextResponse.json({ error: "Missing imageUrl" }, { status: 400 });
-  }
-
-  const id = crypto.randomUUID();
-
-  // Drizzle schema types this as Date (timestamp mode)
-  const createdAt = new Date();
-
-  try {
-    await db.insert(wardrobe_items).values({
-      id,
-      userId,
-      imageUrl,
-      createdAt,
-    });
-
-    return NextResponse.json(
-      { id, userId, imageUrl, createdAt },
-      { status: 201 }
-    );
-  } catch (err) {
-    console.error("WARDROBE_ITEMS_INSERT_FAILED", err);
-    return NextResponse.json({ error: "Insert failed" }, { status: 500 });
-  }
+  return NextResponse.json(response);
 }
 
 /**
  * DELETE /api/wardrobe/items
+ *
  * Deletes a wardrobe item owned by the authenticated user.
  */
 export async function DELETE(request: Request) {
   const token = cookies().get(AUTH_COOKIE_NAME)?.value;
+
   if (!token) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -103,30 +77,20 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const url = new URL(request.url);
-  let id = url.searchParams.get("id");
+  const { id } = await request.json();
 
   if (!id) {
-    try {
-      const body: any = await request.json();
-      id = body?.id;
-    } catch {
-      // no body provided
-    }
-  }
-
-  if (!id || typeof id !== "string") {
     return NextResponse.json({ error: "Missing id" }, { status: 400 });
   }
 
-  try {
-    await db
-      .delete(wardrobe_items)
-      .where(and(eq(wardrobe_items.id, id), eq(wardrobe_items.userId, userId)));
+  await db
+    .delete(wardrobe_items)
+    .where(
+      and(
+        eq(wardrobe_items.id, id),
+        eq(wardrobe_items.userId, userId)
+      )
+    );
 
-    return NextResponse.json({ success: true });
-  } catch (err) {
-    console.error("WARDROBE_ITEMS_DELETE_FAILED", err);
-    return NextResponse.json({ error: "Delete failed" }, { status: 500 });
-  }
+  return NextResponse.json({ success: true });
 }
