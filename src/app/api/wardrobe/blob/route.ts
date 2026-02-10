@@ -4,23 +4,31 @@ import { cookies } from "next/headers";
 import { AUTH_COOKIE_NAME, verifyToken } from "@/lib/auth";
 
 export async function POST(request: Request) {
-  // 🔐 Auth check (cookie-based, aligned with repo)
-  const token = cookies().get(AUTH_COOKIE_NAME)?.value;
-  if (!token) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const userId = verifyToken(token);
-  if (!userId) {
-    return NextResponse.json({ error: "Invalid token" }, { status: 401 });
-  }
-
   // Parse body
   let body: any;
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  const eventType = body?.type;
+
+  // `blob.upload-completed` callbacks can be sent from Blob infra without browser cookies.
+  // Keep cookie auth strict for client token generation requests.
+  let userId: string | null = null;
+  if (eventType !== "blob.upload-completed") {
+    const token = cookies().get(AUTH_COOKIE_NAME)?.value;
+    if (!token) {
+      console.warn("wardrobe/blob unauthorized");
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    userId = verifyToken(token);
+    if (!userId) {
+      console.warn("wardrobe/blob unauthorized");
+      return NextResponse.json({ error: "Invalid token" }, { status: 401 });
+    }
   }
 
   // ✅ Normalize to the envelope Vercel Blob expects:
@@ -54,6 +62,10 @@ export async function POST(request: Request) {
     request,
     body,
     onBeforeGenerateToken: async (_pathname, _clientPayload, _multipart) => {
+      if (!userId) {
+        throw new Error("Unauthorized");
+      }
+
       return {
         allowedContentTypes: ["image/jpeg", "image/png", "image/webp", "image/heic"],
         tokenPayload: JSON.stringify({ userId }),
