@@ -4,6 +4,7 @@ export const dynamic = "force-dynamic";
 
 import { useEffect, useRef, useState } from "react";
 import { upload } from "@vercel/blob/client";
+import Image from "next/image";
 
 type WardrobeItem = {
   id: string;
@@ -51,17 +52,7 @@ function buildItemLabel(item: WardrobeItem) {
 
 function buildThumbnailUrl(imageUrl: string) {
   if (!imageUrl) return imageUrl;
-
-  try {
-    const url = new URL(imageUrl);
-    url.searchParams.set("w", "400");
-    url.searchParams.set("h", "400");
-    url.searchParams.set("fit", "cover");
-    url.searchParams.set("q", "75");
-    return url.toString();
-  } catch {
-    return `${imageUrl}${imageUrl.includes("?") ? "&" : "?"}w=400&h=400&fit=cover&q=75`;
-  }
+  return `${imageUrl}${imageUrl.includes("?") ? "&" : "?"}w=400&h=400&fit=cover&q=75`;
 }
 
 function WardrobeItemCard({
@@ -78,26 +69,25 @@ function WardrobeItemCard({
   const thumbnailUrl = buildThumbnailUrl(item.imageUrl);
 
   return (
-    <div className="relative overflow-hidden rounded border bg-zinc-100">
-      <div className="aspect-square w-full">
-        {imageError ? (
-          <div className="flex h-full w-full flex-col items-center justify-center px-3 text-center text-sm text-zinc-600">
-            <div className="font-medium">Preview unavailable</div>
-            <div className="mt-1 break-words text-xs text-zinc-500">{label}</div>
-          </div>
-        ) : (
-          <img
-            src={thumbnailUrl}
-            alt={label}
-            className="h-full w-full object-cover"
-            loading="lazy"
-            decoding="async"
-            draggable={false}
-            referrerPolicy="no-referrer"
-            onError={() => setImageError(true)}
-          />
-        )}
-      </div>
+    <div className="relative aspect-square w-full overflow-hidden rounded-xl bg-zinc-100">
+      {imageError ? (
+        <div className="flex h-full w-full flex-col items-center justify-center px-3 text-center text-sm text-zinc-600">
+          <div className="font-medium">Preview unavailable</div>
+          <div className="mt-1 break-words text-xs text-zinc-500">{label}</div>
+        </div>
+      ) : (
+        <Image
+          src={thumbnailUrl}
+          alt={label}
+          fill
+          className="object-cover"
+          sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
+          loading="lazy"
+          referrerPolicy="no-referrer"
+          onError={() => setImageError(true)}
+          unoptimized
+        />
+      )}
 
       <button
         type="button"
@@ -283,7 +273,7 @@ export default function WardrobePage() {
         <div className="mt-4 text-sm text-zinc-600">Uploading…</div>
       )}
 
-      <div className="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 md:grid-cols-4 lg:grid-cols-5">
+      <div className="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
         {items.map((item) => (
           <WardrobeItemCard key={item.id} item={item} onDelete={handleDelete} />
         ))}
