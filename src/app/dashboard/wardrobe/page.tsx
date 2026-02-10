@@ -52,7 +52,35 @@ function buildItemLabel(item: WardrobeItem) {
 
 function buildThumbnailUrl(imageUrl: string) {
   if (!imageUrl) return imageUrl;
-  return `${imageUrl}${imageUrl.includes("?") ? "&" : "?"}w=400&h=400&fit=cover&q=75`;
+
+  try {
+    const hasProtocol = /^[a-zA-Z][a-zA-Z\d+.-]*:/.test(imageUrl);
+    const parsedUrl = hasProtocol
+      ? new URL(imageUrl)
+      : new URL(imageUrl, "https://thumbnail.local");
+
+    parsedUrl.searchParams.delete("w");
+    parsedUrl.searchParams.delete("h");
+    parsedUrl.searchParams.delete("fit");
+    parsedUrl.searchParams.delete("q");
+
+    parsedUrl.searchParams.set("w", "400");
+    parsedUrl.searchParams.set("h", "400");
+    parsedUrl.searchParams.set("fit", "cover");
+    parsedUrl.searchParams.set("q", "75");
+
+    if (hasProtocol) {
+      return parsedUrl.toString();
+    }
+
+    const normalizedPath = imageUrl.startsWith("/")
+      ? parsedUrl.pathname
+      : parsedUrl.pathname.replace(/^\/+/, "");
+
+    return `${normalizedPath}${parsedUrl.search}${parsedUrl.hash}`;
+  } catch {
+    return imageUrl;
+  }
 }
 
 function WardrobeItemCard({
