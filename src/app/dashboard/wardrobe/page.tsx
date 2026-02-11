@@ -88,6 +88,8 @@ async function canvasConvertToJpeg(file: File) {
       throw new Error("Failed to create drawing context.");
     }
 
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, width, height);
     ctx.drawImage(image, 0, 0, width, height);
 
     const jpegBlob = await new Promise<Blob>((resolve, reject) => {
