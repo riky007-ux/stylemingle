@@ -20,6 +20,144 @@ function safeUUID() {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
+const JPEG_QUALITY = 0.9;
+
+function getFileExtension(fileName: string) {
+  const parts = fileName.split(".");
+  if (parts.length <= 1) return "";
+  return parts.pop()?.toLowerCase() || "";
+}
+
+function getFileBaseName(fileName: string) {
+  const dotIndex = fileName.lastIndexOf(".");
+  if (dotIndex <= 0) return fileName;
+  return fileName.slice(0, dotIndex);
+}
+
+function buildJpegFileName(fileName: string) {
+  const baseName = getFileBaseName(fileName).trim() || safeUUID();
+  return `${baseName}.jpg`;
+}
+
+function isHeicFile(file: File) {
+  const extension = getFileExtension(file.name);
+  const mimeType = (file.type || "").toLowerCase();
+  return (
+    extension === "heic" ||
+    extension === "heif" ||
+    mimeType.includes("heic") ||
+    mimeType.includes("heif")
+  );
+}
+
+function isPngOrWebp(file: File) {
+  const extension = getFileExtension(file.name);
+  const mimeType = (file.type || "").toLowerCase();
+  return (
+    extension === "png" ||
+    extension === "webp" ||
+    mimeType === "image/png" ||
+    mimeType === "image/webp"
+  );
+}
+
+async function canvasConvertToJpeg(file: File) {
+  const objectUrl = URL.createObjectURL(file);
+
+  try {
+    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const img = document.createElement("img");
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error("Failed to decode image."));
+      img.src = objectUrl;
+    });
+
+    const width = image.naturalWidth || image.width;
+    const height = image.naturalHeight || image.height;
+
+    if (!width || !height) {
+      throw new Error("Image dimensions are invalid for conversion.");
+    }
+
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      throw new Error("Failed to create drawing context.");
+    }
+
+    ctx.drawImage(image, 0, 0, width, height);
+
+    const jpegBlob = await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob(
+        (blob) => {
+          if (!blob) {
+            reject(new Error("Canvas conversion failed."));
+            return;
+          }
+          resolve(blob);
+        },
+        "image/jpeg",
+        JPEG_QUALITY
+      );
+    });
+
+    return new File([jpegBlob], buildJpegFileName(file.name), {
+      type: "image/jpeg",
+      lastModified: Date.now(),
+    });
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
+async function normalizeImageToJpeg(file: File) {
+  if (isHeicFile(file)) {
+    const heic2any = (await import("heic2any")).default;
+    const conversionResult = await heic2any({
+      blob: file,
+      toType: "image/jpeg",
+      quality: JPEG_QUALITY,
+    });
+
+    const jpegBlob = Array.isArray(conversionResult)
+      ? conversionResult[0]
+      : conversionResult;
+
+    if (!(jpegBlob instanceof Blob)) {
+      throw new Error("Unexpected HEIC conversion result.");
+    }
+
+    return new File([jpegBlob], buildJpegFileName(file.name), {
+      type: "image/jpeg",
+      lastModified: Date.now(),
+    });
+  }
+
+  if (isPngOrWebp(file)) {
+    return canvasConvertToJpeg(file);
+  }
+
+  const extension = getFileExtension(file.name);
+  const mimeType = (file.type || "").toLowerCase();
+  const isAlreadyJpeg =
+    extension === "jpg" ||
+    extension === "jpeg" ||
+    mimeType === "image/jpeg" ||
+    mimeType === "image/jpg";
+
+  if (isAlreadyJpeg) {
+    return new File([file], buildJpegFileName(file.name), {
+      type: "image/jpeg",
+      lastModified: file.lastModified || Date.now(),
+    });
+  }
+
+  return canvasConvertToJpeg(file);
+}
+
 function extractFilename(imageUrl: string) {
   if (!imageUrl) return "";
   try {
@@ -199,54 +337,13 @@ export default function WardrobePage() {
     setUploadNotice(null);
     setLoading(true);
 
-    let fileToUpload = file;
-    let uploadExt =
-      (file.name.split(".").pop() || "").toLowerCase() || "bin";
-
-    const isHeic =
-      uploadExt === "heic" ||
-      uploadExt === "heif" ||
-      (file.type || "").toLowerCase().includes("heic") ||
-      (file.type || "").toLowerCase().includes("heif");
-
-    if (isHeic) {
-      try {
-        // 🔑 Dynamic import — ONLY runs in browser after user action
-        const heic2any = (await import("heic2any")).default;
-
-        const result: any = await heic2any({
-          blob: file,
-          toType: "image/jpeg",
-          quality: 0.9,
-        });
-
-        const jpegBlob = Array.isArray(result) ? result[0] : result;
-
-        if (jpegBlob instanceof Blob) {
-          fileToUpload = new File([jpegBlob], `${safeUUID()}.jpg`, {
-            type: "image/jpeg",
-          });
-          uploadExt = "jpg";
-        } else {
-          console.error("HEIC_CONVERSION_UNEXPECTED_RESULT", result);
-          setUploadNotice(
-            "Preview may not render in all browsers. Original file saved."
-          );
-          fileToUpload = file;
-        }
-      } catch (err) {
-        console.error("HEIC_CONVERSION_FAILED_FALLBACK", err);
-        setUploadNotice(
-          "Preview may not render in all browsers. Original file saved."
-        );
-        fileToUpload = file;
-      }
-    }
-
     try {
+      const normalizedFile = await normalizeImageToJpeg(file);
+      const uploadPath = `wardrobe/${safeUUID()}.jpg`;
+
       const blob = await upload(
-        `wardrobe/${safeUUID()}.${uploadExt}`,
-        fileToUpload,
+        uploadPath,
+        normalizedFile,
         {
           access: "public",
           handleUploadUrl: "/api/wardrobe/blob",
@@ -264,6 +361,9 @@ export default function WardrobePage() {
       await loadItems();
     } catch (err) {
       console.error(err);
+      setUploadNotice(
+        "Sorry, we couldn’t process that image — try another one."
+      );
       setError("Upload failed");
     } finally {
       setLoading(false);
