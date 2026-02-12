@@ -5,8 +5,6 @@ import { cookies } from "next/headers";
 import { AUTH_COOKIE_NAME, verifyToken } from "@/lib/auth";
 import { createWardrobeBlobPostHandler } from "@/lib/wardrobe-blob-upload-handler";
 
-console.log("SHARP_TEST_LOAD", typeof require("sharp"));
-
 export const POST = createWardrobeBlobPostHandler({
   authCookieName: AUTH_COOKIE_NAME,
   getCookieStore: () => cookies(),
