@@ -1,7 +1,9 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   experimental: {
-    serverExternalPackages: ["sharp"],
+    outputFileTracingIncludes: {
+      "/api/wardrobe/blob": ["node_modules/sharp/**/*", "node_modules/@img/**/*"],
+    },
   },
 };
 
