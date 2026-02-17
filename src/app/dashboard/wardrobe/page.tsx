@@ -371,7 +371,14 @@ export default function WardrobePage() {
         disabled={loading}
         onChange={(e) => {
           const file = e.target.files?.[0];
-          if (file) handleUpload(file);
+          if (!file) return;
+
+          if (isHeicOrHeif(file)) {
+            void handleUpload(file);
+            return;
+          }
+
+          void handleUpload(file);
         }}
       />
 
