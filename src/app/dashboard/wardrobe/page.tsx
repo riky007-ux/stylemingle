@@ -39,14 +39,13 @@ function buildJpegFileName(fileName: string) {
   return `${baseName}.jpg`;
 }
 
-function isHeicFile(file: File) {
-  const extension = getFileExtension(file.name);
-  const mimeType = (file.type || "").toLowerCase();
+function isHeicOrHeif(file: File) {
+  const lowerName = file.name.toLowerCase();
   return (
-    extension === "heic" ||
-    extension === "heif" ||
-    mimeType.includes("heic") ||
-    mimeType.includes("heif")
+    file.type === "image/heic" ||
+    file.type === "image/heif" ||
+    lowerName.endsWith(".heic") ||
+    lowerName.endsWith(".heif")
   );
 }
 
@@ -116,26 +115,8 @@ async function canvasConvertToJpeg(file: File) {
 }
 
 async function normalizeImageToJpeg(file: File) {
-  if (isHeicFile(file)) {
-    const heic2any = (await import("heic2any")).default;
-    const conversionResult = await heic2any({
-      blob: file,
-      toType: "image/jpeg",
-      quality: JPEG_QUALITY,
-    });
-
-    const jpegBlob = Array.isArray(conversionResult)
-      ? conversionResult[0]
-      : conversionResult;
-
-    if (!(jpegBlob instanceof Blob)) {
-      throw new Error("Unexpected HEIC conversion result.");
-    }
-
-    return new File([jpegBlob], buildJpegFileName(file.name), {
-      type: "image/jpeg",
-      lastModified: Date.now(),
-    });
+  if (isHeicOrHeif(file)) {
+    return file;
   }
 
   if (isPngOrWebp(file)) {
@@ -340,7 +321,7 @@ export default function WardrobePage() {
     setLoading(true);
 
     try {
-      const normalizedFile = await normalizeImageToJpeg(file);
+      const normalizedFile = isHeicOrHeif(file) ? file : await normalizeImageToJpeg(file);
       const uploadPath = `wardrobe/${safeUUID()}.jpg`;
 
       const blob = await upload(
