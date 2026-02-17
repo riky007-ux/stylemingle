@@ -41,12 +41,17 @@ function buildJpegFileName(fileName: string) {
 
 function isHeicOrHeif(file: File) {
   const lowerName = file.name.toLowerCase();
-  return (
-    file.type === "image/heic" ||
-    file.type === "image/heif" ||
+  const mime = (file.type || "").toLowerCase();
+
+  const isHeic =
     lowerName.endsWith(".heic") ||
-    lowerName.endsWith(".heif")
-  );
+    mime.includes("heic");
+
+  const isHeif =
+    lowerName.endsWith(".heif") ||
+    mime.includes("heif");
+
+  return isHeic || isHeif;
 }
 
 function isPngOrWebp(file: File) {
