@@ -1,6 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { put } from "@vercel/blob";
 
+import { AUTH_COOKIE_NAME, verifyToken } from "@/lib/auth";
 import { shouldAttemptNormalization } from "@/lib/wardrobe-blob-upload-handler";
 
 export const config = {
@@ -16,6 +17,13 @@ type NormalizeRequestBody = {
 };
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  const token = req.cookies?.[AUTH_COOKIE_NAME];
+  const userId = token ? verifyToken(token) : null;
+
+  if (!userId) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
     return res.status(405).json({ error: "Method not allowed" });
