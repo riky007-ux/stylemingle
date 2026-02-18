@@ -76,6 +76,12 @@ export function createWardrobeBlobPostHandler(deps: RouteDependencies) {
   const normalizeBufferImpl = deps.normalizeBufferImpl ?? normalizeImageBufferToJpeg;
 
   return async function POST(request: Request) {
+    const headerHost = request.headers.get("host");
+    const host = headerHost ?? new URL(request.url).host;
+    const protocol = request.headers.get("x-forwarded-proto") ?? "https";
+    const baseUrl = `${protocol}://${host}`;
+    const callbackPath = new URL(request.url).pathname;
+
     let body: any;
     try {
       body = await request.json();
@@ -140,6 +146,7 @@ export function createWardrobeBlobPostHandler(deps: RouteDependencies) {
             "image/heif",
           ],
           tokenPayload: JSON.stringify({ userId }),
+          callbackUrl: `${baseUrl}${callbackPath}`,
         };
       },
       onUploadCompleted: async ({ blob }: { blob: { url: string; pathname: string; contentType?: string } }) => {
