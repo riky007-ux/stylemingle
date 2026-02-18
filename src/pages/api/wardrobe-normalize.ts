@@ -1,7 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { put } from "@vercel/blob";
 
-import { AUTH_COOKIE_NAME, verifyToken } from "@/lib/auth";
 import { shouldAttemptNormalization } from "@/lib/wardrobe-blob-upload-handler";
 
 export const config = {
@@ -9,6 +8,11 @@ export const config = {
 };
 
 type NormalizeRequestBody = {
+  eventType?: string;
+  tokenPayload?: string;
+  payload?: {
+    tokenPayload?: string;
+  };
   blob?: {
     url?: string;
     pathname?: string;
@@ -17,23 +21,46 @@ type NormalizeRequestBody = {
 };
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  const token = req.cookies?.[AUTH_COOKIE_NAME];
-  const userId = token ? verifyToken(token) : null;
-
-  if (!userId) {
-    return res.status(401).json({ error: "Unauthorized" });
-  }
-
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
     return res.status(405).json({ error: "Method not allowed" });
   }
 
   const body = (req.body ?? {}) as NormalizeRequestBody;
+  const eventType = body.eventType;
   const blob = body.blob;
+  const tokenPayload = body.tokenPayload ?? body.payload?.tokenPayload ?? null;
+
+  if (eventType !== "blob.upload-completed") {
+    return res.status(400).json({ error: "Invalid eventType" });
+  }
+
+  if (!tokenPayload) {
+    return res.status(400).json({ error: "Missing tokenPayload" });
+  }
 
   if (!blob?.url || !blob.pathname) {
     return res.status(400).json({ error: "Missing blob payload" });
+  }
+
+  let blobUrl: URL;
+  try {
+    blobUrl = new URL(blob.url);
+  } catch {
+    return res.status(400).json({ error: "Invalid blob url" });
+  }
+
+  const allowedBlobHost =
+    blobUrl.hostname === "blob.vercel-storage.com" ||
+    blobUrl.hostname.endsWith(".blob.vercel-storage.com") ||
+    blobUrl.hostname.endsWith(".public.blob.vercel-storage.com");
+
+  if (!allowedBlobHost) {
+    return res.status(400).json({ error: "Invalid blob host" });
+  }
+
+  if (!blob.pathname.startsWith("wardrobe/")) {
+    return res.status(400).json({ error: "Invalid blob pathname" });
   }
 
   if (!shouldAttemptNormalization(blob.contentType, blob.pathname)) {

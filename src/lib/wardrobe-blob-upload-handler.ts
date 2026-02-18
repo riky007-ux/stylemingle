@@ -25,8 +25,8 @@ export function shouldAttemptNormalization(contentType: string | undefined, path
   return ["jpg", "jpeg", "png", "webp", "heic", "heif"].includes(extension);
 }
 
-
 type UploadBody = HandleUploadBody & {
+  tokenPayload?: string;
   payload?: {
     blob?: {
       url: string;
@@ -54,9 +54,9 @@ export function createWardrobeBlobPostHandler(deps: RouteDependencies) {
   const fetchImpl = deps.fetchImpl ?? fetch;
 
   return async function POST(request: Request) {
-    let body: any;
+    let body: UploadBody;
     try {
-      body = await request.json();
+      body = (await request.json()) as UploadBody;
     } catch {
       return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
     }
@@ -87,7 +87,7 @@ export function createWardrobeBlobPostHandler(deps: RouteDependencies) {
             clientPayload: (body as any).clientPayload ?? "",
             multipart: (body as any).multipart ?? false,
           },
-        };
+        } as UploadBody;
       }
 
       if (body.type === "blob.upload-completed" && (body as any).blob !== undefined) {
@@ -97,7 +97,7 @@ export function createWardrobeBlobPostHandler(deps: RouteDependencies) {
             blob: (body as any).blob,
             tokenPayload: (body as any).tokenPayload,
           },
-        };
+        } as UploadBody;
       }
     }
 
@@ -129,15 +129,22 @@ export function createWardrobeBlobPostHandler(deps: RouteDependencies) {
           const hostHeader = request.headers.get("host");
           const host = hostHeader ?? new URL(request.url).host;
           const protocol = request.headers.get("x-forwarded-proto") ?? "https";
-          const baseUrl = `${protocol}://${host}`;
+          const origin = `${protocol}://${host}`;
+          const tokenPayload = body?.payload?.tokenPayload ?? body?.tokenPayload ?? null;
 
-          const normalizeResponse = await fetchImpl(`${baseUrl}/api/wardrobe-normalize`, {
+          if (!tokenPayload) {
+            console.error("Missing tokenPayload before normalize call");
+            return;
+          }
+
+          const normalizeResponse = await fetchImpl(`${origin}/api/wardrobe-normalize`, {
             method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Cookie: request.headers.get("cookie") ?? "",
-            },
-            body: JSON.stringify({ blob }),
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              eventType: body?.type ?? "blob.upload-completed",
+              blob,
+              tokenPayload,
+            }),
           });
 
           if (!normalizeResponse.ok) {
