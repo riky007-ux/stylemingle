@@ -2,7 +2,10 @@
 const nextConfig = {
   experimental: {
     outputFileTracingIncludes: {
-      "/api/wardrobe/blob": ["node_modules/sharp/**/*", "node_modules/@img/**/*"],
+      "/api/wardrobe/blob": [
+        "node_modules/sharp/**/*",
+        "node_modules/@img/**/*",
+      ],
     },
   },
 };
