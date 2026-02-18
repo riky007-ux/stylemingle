@@ -133,7 +133,10 @@ export function createWardrobeBlobPostHandler(deps: RouteDependencies) {
 
           const normalizeResponse = await fetchImpl(`${baseUrl}/api/wardrobe-normalize`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: {
+              "Content-Type": "application/json",
+              Cookie: request.headers.get("cookie") ?? "",
+            },
             body: JSON.stringify({ blob }),
           });
 
