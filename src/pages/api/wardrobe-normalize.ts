@@ -1,5 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { put } from "@vercel/blob";
+import sharp from "sharp";
 
 import { decodeHeicToRgba } from "@/lib/decode-heic-to-rgba";
 import { shouldAttemptNormalization } from "@/lib/wardrobe-blob-upload-handler";
@@ -7,8 +8,6 @@ import { shouldAttemptNormalization } from "@/lib/wardrobe-blob-upload-handler";
 export const config = {
   runtime: "nodejs",
 };
-
-const MAX_SIZE = 2048;
 
 type NormalizeRequestBody = {
   eventType?: string;
@@ -22,18 +21,6 @@ type NormalizeRequestBody = {
     contentType?: string;
   };
 };
-
-function isHeicOrHeif(pathname: string, contentType: string | undefined) {
-  const normalizedPath = pathname.toLowerCase();
-  const normalizedType = contentType?.toLowerCase();
-
-  return (
-    normalizedPath.endsWith(".heic") ||
-    normalizedPath.endsWith(".heif") ||
-    normalizedType?.includes("heic") ||
-    normalizedType?.includes("heif")
-  );
-}
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== "POST") {
@@ -83,64 +70,65 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   try {
-    const sourceResponse = await fetch(blob.url);
-    if (!sourceResponse.ok) {
-      throw new Error(`Failed to read blob: ${sourceResponse.status}`);
-    }
+    const pathname = blob.pathname.toLowerCase();
+    const contentType = (blob.contentType || "").toLowerCase();
 
-    const sourceBuffer = Buffer.from(await sourceResponse.arrayBuffer());
-    const sharpModule = await import("sharp");
+    const isHeic =
+      pathname.endsWith(".heic") ||
+      pathname.endsWith(".heif") ||
+      contentType === "image/heic" ||
+      contentType === "image/heif";
 
-    const shouldUseHeicDecoder = isHeicOrHeif(blob.pathname, sourceResponse.headers.get("content-type") ?? blob.contentType);
-
-    const jpegBuffer = shouldUseHeicDecoder
-      ? await (async () => {
-          try {
-            const { data, width, height } = await decodeHeicToRgba(sourceBuffer);
-            return sharpModule
-              .default(data, {
-                raw: {
-                  width,
-                  height,
-                  channels: 4,
-                },
-              })
-              .rotate()
-              .resize(MAX_SIZE, MAX_SIZE, { fit: "inside", withoutEnlargement: true })
-              .jpeg({ quality: 82 })
-              .toBuffer();
-          } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            console.error("wardrobe/blob heic decode failed", {
-              pathname: blob.pathname,
-              contentType: sourceResponse.headers.get("content-type") ?? blob.contentType,
-              message,
-            });
-            throw new Error("HEIC decode failed (wasm)");
-          }
-        })()
-      : await sharpModule
-          .default(sourceBuffer, { failOn: "none" })
-          .rotate()
-          .resize(MAX_SIZE, MAX_SIZE, { fit: "inside", withoutEnlargement: true })
-          .jpeg({ quality: 82 })
-          .toBuffer();
-
-    await put(blob.pathname, jpegBuffer, {
-      access: "public",
-      contentType: "image/jpeg",
-      addRandomSuffix: false,
-      allowOverwrite: true,
+    console.log("Normalize route:", {
+      isHeic,
+      pathname,
+      contentType,
     });
 
-    return res.status(200).json({ ok: true });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (message === "HEIC decode failed (wasm)") {
-      return res.status(422).json({ error: message });
+    const inputBuffer = await fetch(blob.url).then((r) => r.arrayBuffer());
+    const buffer = Buffer.from(inputBuffer);
+
+    if (isHeic) {
+      const { data, width, height } = await decodeHeicToRgba(buffer);
+
+      const jpegBuffer = await sharp(data, {
+        raw: { width, height, channels: 4 },
+      })
+        .jpeg({ quality: 90 })
+        .toBuffer();
+
+      await put(blob.pathname, jpegBuffer, {
+        access: "public",
+        contentType: "image/jpeg",
+      });
+
+      return res.status(200).json({ ok: true, converted: "heic-wasm" });
     }
 
-    console.error("wardrobe/blob normalization failed", error);
+    if (!isHeic) {
+      const jpegBuffer = await sharp(buffer)
+        .jpeg({ quality: 90 })
+        .toBuffer();
+
+      await put(blob.pathname, jpegBuffer, {
+        access: "public",
+        contentType: "image/jpeg",
+      });
+
+      return res.status(200).json({ ok: true, converted: "sharp" });
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("wardrobe/blob normalization failed", {
+      pathname: blob.pathname,
+      contentType: blob.contentType,
+      message,
+    });
+
+    if (message.includes("HEIC")) {
+      return res.status(422).json({ error: "HEIC decode failed (wasm)" });
+    }
+
     return res.status(500).json({ error: "Normalization failed" });
   }
 }
