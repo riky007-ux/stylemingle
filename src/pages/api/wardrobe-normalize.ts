@@ -70,20 +70,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   try {
-    const pathname = blob.pathname.toLowerCase();
-    const contentType = (blob.contentType || "").toLowerCase();
+    const extension = blob.pathname.toLowerCase();
+    const callbackContentType = blob.contentType?.toLowerCase() ?? "";
 
     const isHeic =
-      pathname.endsWith(".heic") ||
-      pathname.endsWith(".heif") ||
-      contentType === "image/heic" ||
-      contentType === "image/heif";
-
-    console.log("Normalize route:", {
-      isHeic,
-      pathname,
-      contentType,
-    });
+      extension.endsWith(".heic") ||
+      extension.endsWith(".heif") ||
+      callbackContentType === "image/heic" ||
+      callbackContentType === "image/heif";
 
     const inputBuffer = await fetch(blob.url).then((r) => r.arrayBuffer());
     const buffer = Buffer.from(inputBuffer);
