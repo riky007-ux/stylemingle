@@ -23,9 +23,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  const body = (req.body ?? {}) as NormalizeRequestBody;
-  const tokenPayload = body.tokenPayload;
-  const blob = body.blob;
+  const { blob, tokenPayload } = (req.body ?? {}) as NormalizeRequestBody;
 
   if (!tokenPayload) {
     return res.status(401).json({ error: "Unauthorized" });
@@ -33,13 +31,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   let userId: string;
   try {
-    ({ userId } = verifyBlobTokenPayload(tokenPayload));
+    const verified = verifyBlobTokenPayload(tokenPayload);
+    userId = verified.userId;
   } catch {
     return res.status(401).json({ error: "Unauthorized" });
   }
 
   if (!userId) {
-    return res.status(400).json({ error: "Missing userId" });
+    return res.status(401).json({ error: "Unauthorized" });
   }
 
   if (!blob?.url || !blob.pathname) {
