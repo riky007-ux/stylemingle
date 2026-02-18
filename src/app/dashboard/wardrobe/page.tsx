@@ -216,22 +216,106 @@ function WardrobeItemCard({
   item: WardrobeItem;
   onDelete: (id: string) => Promise<void>;
 }) {
-  const [imageError, setImageError] = useState(false);
+  const [imageSrc, setImageSrc] = useState("");
+  const [loadError, setLoadError] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
+  const [retryDeadline, setRetryDeadline] = useState<number | null>(null);
   const [deleting, setDeleting] = useState(false);
+
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const retryInFlightRef = useRef(false);
 
   const label = buildItemLabel(item);
   const thumbnailUrl = buildThumbnailUrl(item.imageUrl);
 
+  useEffect(() => {
+    setImageSrc(thumbnailUrl);
+    setLoadError(false);
+    setRetryCount(0);
+    setRetryDeadline(null);
+    retryInFlightRef.current = false;
+
+    if (retryTimerRef.current) {
+      clearTimeout(retryTimerRef.current);
+      retryTimerRef.current = null;
+    }
+  }, [thumbnailUrl]);
+
+  useEffect(() => {
+    return () => {
+      if (retryTimerRef.current) {
+        clearTimeout(retryTimerRef.current);
+      }
+    };
+  }, []);
+
+  const appendCacheBustParam = (url: string) => {
+    const [base, hash = ""] = url.split("#");
+    const [path, query = ""] = base.split("?");
+    const params = new URLSearchParams(query);
+    params.set("v", String(Date.now()));
+    const withQuery = `${path}?${params.toString()}`;
+    return hash ? `${withQuery}#${hash}` : withQuery;
+  };
+
+  const runRetryLoop = async () => {
+    if (retryInFlightRef.current) return;
+    retryInFlightRef.current = true;
+
+    try {
+      const originalUrl = thumbnailUrl;
+      let deadline = retryDeadline;
+
+      if (!deadline) {
+        deadline = Date.now() + 15_000;
+        setRetryDeadline(deadline);
+      }
+
+      const tryHeadAndRecover = async () => {
+        if (Date.now() >= (deadline as number)) {
+          setLoadError(true);
+          return;
+        }
+
+        try {
+          const res = await fetch(originalUrl, { method: "HEAD", cache: "no-store" });
+          const contentType = (res.headers.get("content-type") || "").toLowerCase();
+
+          if (contentType === "image/jpeg") {
+            if (retryTimerRef.current) {
+              clearTimeout(retryTimerRef.current);
+              retryTimerRef.current = null;
+            }
+            setImageSrc(appendCacheBustParam(originalUrl));
+            setLoadError(false);
+            return;
+          }
+        } catch {
+          // Retry until deadline.
+        }
+
+        setRetryCount((prev) => prev + 1);
+        retryTimerRef.current = setTimeout(() => {
+          void tryHeadAndRecover();
+        }, 500);
+      };
+
+      await tryHeadAndRecover();
+    } finally {
+      retryInFlightRef.current = false;
+    }
+  };
+
   return (
     <div className="relative aspect-square w-full overflow-hidden rounded-xl bg-zinc-100">
-      {imageError ? (
+      {loadError ? (
         <div className="flex h-full w-full flex-col items-center justify-center px-3 text-center text-sm text-zinc-600">
           <div className="font-medium">Preview unavailable</div>
           <div className="mt-1 break-words text-xs text-zinc-500">{label}</div>
         </div>
       ) : (
         <Image
-          src={thumbnailUrl}
+          src={imageSrc || thumbnailUrl}
           alt={label}
           width={400}
           height={400}
@@ -239,7 +323,17 @@ function WardrobeItemCard({
           sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
           loading="lazy"
           referrerPolicy="no-referrer"
-          onError={() => setImageError(true)}
+          onLoad={() => {
+            if (retryTimerRef.current) {
+              clearTimeout(retryTimerRef.current);
+              retryTimerRef.current = null;
+            }
+            setLoadError(false);
+            setRetryDeadline(null);
+          }}
+          onError={() => {
+            void runRetryLoop();
+          }}
           unoptimized
         />
       )}
