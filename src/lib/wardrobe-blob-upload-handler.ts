@@ -1,4 +1,3 @@
-import { put } from "@vercel/blob";
 import { handleUpload, type HandleUploadBody } from "@vercel/blob/client";
 import { NextResponse } from "next/server.js";
 
@@ -26,23 +25,6 @@ export function shouldAttemptNormalization(contentType: string | undefined, path
   return ["jpg", "jpeg", "png", "webp", "heic", "heif"].includes(extension);
 }
 
-async function convertToJpegWithSharp(sourceBuffer: Buffer) {
-  const dynamicImport = new Function("moduleName", "return import(moduleName)") as (
-    moduleName: string,
-  ) => Promise<any>;
-
-  const sharpModule = await dynamicImport("sharp");
-
-  return sharpModule
-    .default(sourceBuffer, { failOn: "none" })
-    .rotate()
-    .jpeg({ quality: 90 })
-    .toBuffer();
-}
-
-export async function normalizeImageBufferToJpeg(sourceBuffer: Buffer) {
-  return convertToJpegWithSharp(sourceBuffer);
-}
 
 type UploadBody = HandleUploadBody & {
   payload?: {
@@ -64,16 +46,12 @@ type RouteDependencies = {
   getCookieStore: () => CookieStore;
   verifyToken: (token: string) => string | null;
   handleUploadImpl?: typeof handleUpload;
-  putImpl?: typeof put;
   fetchImpl?: typeof fetch;
-  normalizeBufferImpl?: (buffer: Buffer) => Promise<Buffer>;
 };
 
 export function createWardrobeBlobPostHandler(deps: RouteDependencies) {
   const handleUploadImpl = deps.handleUploadImpl ?? handleUpload;
-  const putImpl = deps.putImpl ?? put;
   const fetchImpl = deps.fetchImpl ?? fetch;
-  const normalizeBufferImpl = deps.normalizeBufferImpl ?? normalizeImageBufferToJpeg;
 
   return async function POST(request: Request) {
     let body: any;
@@ -148,20 +126,20 @@ export function createWardrobeBlobPostHandler(deps: RouteDependencies) {
         }
 
         try {
-          const sourceResponse = await fetchImpl(blob.url);
-          if (!sourceResponse.ok) {
-            throw new Error(`Failed to read blob: ${sourceResponse.status}`);
-          }
+          const hostHeader = request.headers.get("host");
+          const host = hostHeader ?? new URL(request.url).host;
+          const protocol = request.headers.get("x-forwarded-proto") ?? "https";
+          const baseUrl = `${protocol}://${host}`;
 
-          const sourceBuffer = Buffer.from(await sourceResponse.arrayBuffer());
-          const jpegBuffer = await normalizeBufferImpl(sourceBuffer);
-
-          await putImpl(blob.pathname, jpegBuffer, {
-            access: "public",
-            contentType: "image/jpeg",
-            addRandomSuffix: false,
-            allowOverwrite: true,
+          const normalizeResponse = await fetchImpl(`${baseUrl}/api/wardrobe-normalize`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ blob }),
           });
+
+          if (!normalizeResponse.ok) {
+            throw new Error(`Normalization route failed: ${normalizeResponse.status}`);
+          }
         } catch (error) {
           console.error("wardrobe/blob normalization failed", error);
         }
