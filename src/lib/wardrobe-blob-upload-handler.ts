@@ -37,6 +37,19 @@ type UploadBody = HandleUploadBody & {
   };
 };
 
+function readUserIdFromTokenPayload(tokenPayload: unknown): string | null {
+  if (typeof tokenPayload !== "string") {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(tokenPayload) as { userId?: unknown };
+    return typeof parsed.userId === "string" && parsed.userId.length > 0 ? parsed.userId : null;
+  } catch {
+    return null;
+  }
+}
+
 type CookieStore = {
   get(name: string): { value: string } | undefined;
 };
@@ -64,7 +77,9 @@ export function createWardrobeBlobPostHandler(deps: RouteDependencies) {
     const eventType = body?.type;
 
     let userId: string | null = null;
-    if (eventType !== "blob.upload-completed") {
+    if (eventType === "blob.upload-completed") {
+      userId = readUserIdFromTokenPayload(body?.payload?.tokenPayload);
+    } else {
       const token = deps.getCookieStore().get(deps.authCookieName)?.value;
       if (!token) {
         console.warn("wardrobe/blob unauthorized");
@@ -135,9 +150,9 @@ export function createWardrobeBlobPostHandler(deps: RouteDependencies) {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
-              Cookie: request.headers.get("cookie") ?? "",
+              "x-internal-call": "wardrobe-blob",
             },
-            body: JSON.stringify({ blob }),
+            body: JSON.stringify({ blob, userId }),
           });
 
           if (!normalizeResponse.ok) {
