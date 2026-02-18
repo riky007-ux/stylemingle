@@ -1,9 +1,6 @@
 import { handleUpload, type HandleUploadBody } from "@vercel/blob/client";
 import { NextResponse } from "next/server.js";
 
-import { signToken } from "@/lib/auth";
-import { verifyBlobTokenPayload } from "@/lib/verify-blob-token";
-
 const SUPPORTED_IMAGE_MIME_TYPES = new Set([
   "image/jpeg",
   "image/jpg",
@@ -28,14 +25,7 @@ export function shouldAttemptNormalization(contentType: string | undefined, path
   return ["jpg", "jpeg", "png", "webp", "heic", "heif"].includes(extension);
 }
 
-
 type UploadBody = HandleUploadBody & {
-  type?: string;
-  blob?: {
-    url: string;
-    pathname: string;
-    contentType?: string;
-  };
   tokenPayload?: string;
   payload?: {
     blob?: {
@@ -46,28 +36,6 @@ type UploadBody = HandleUploadBody & {
     tokenPayload?: string;
   };
 };
-
-function isUploadCompletedEvent(eventType: unknown): boolean {
-  return eventType === "blob.upload-completed" || eventType === "blob.upload.completed";
-}
-
-function normalizeUploadBody(body: UploadBody): UploadBody {
-  if (body?.payload?.blob) {
-    return body;
-  }
-
-  if (body?.blob) {
-    return {
-      type: "blob.upload-completed",
-      payload: {
-        blob: body.blob,
-        tokenPayload: body.tokenPayload,
-      },
-    } as UploadBody;
-  }
-
-  return body;
-}
 
 type CookieStore = {
   get(name: string): { value: string } | undefined;
@@ -86,32 +54,17 @@ export function createWardrobeBlobPostHandler(deps: RouteDependencies) {
   const fetchImpl = deps.fetchImpl ?? fetch;
 
   return async function POST(request: Request) {
-    let body: any;
+    let body: UploadBody;
     try {
-      body = await request.json();
+      body = (await request.json()) as UploadBody;
     } catch {
       return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
     }
 
-    const normalizedBody = normalizeUploadBody(body);
-    const eventType = normalizedBody?.type;
-    body = normalizedBody;
+    const eventType = body?.type;
 
     let userId: string | null = null;
-    if (isUploadCompletedEvent(eventType)) {
-      const tokenPayload = normalizedBody?.payload?.tokenPayload ?? null;
-      if (!tokenPayload) {
-        console.error("Missing tokenPayload before normalize call");
-        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-      }
-
-      try {
-        const verified = verifyBlobTokenPayload(tokenPayload);
-        userId = verified.userId;
-      } catch {
-        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-      }
-    } else {
+    if (eventType !== "blob.upload-completed") {
       const token = deps.getCookieStore().get(deps.authCookieName)?.value;
       if (!token) {
         console.warn("wardrobe/blob unauthorized");
@@ -134,17 +87,17 @@ export function createWardrobeBlobPostHandler(deps: RouteDependencies) {
             clientPayload: (body as any).clientPayload ?? "",
             multipart: (body as any).multipart ?? false,
           },
-        };
+        } as UploadBody;
       }
 
-      if (isUploadCompletedEvent(body.type) && (body as any).blob !== undefined) {
+      if (body.type === "blob.upload-completed" && (body as any).blob !== undefined) {
         body = {
-          type: "blob.upload-completed",
+          type: body.type,
           payload: {
             blob: (body as any).blob,
             tokenPayload: (body as any).tokenPayload,
           },
-        };
+        } as UploadBody;
       }
     }
 
@@ -164,7 +117,7 @@ export function createWardrobeBlobPostHandler(deps: RouteDependencies) {
             "image/heic",
             "image/heif",
           ],
-          tokenPayload: signToken(userId),
+          tokenPayload: JSON.stringify({ userId }),
         };
       },
       onUploadCompleted: async ({ blob }: { blob: { url: string; pathname: string; contentType?: string } }) => {
@@ -176,25 +129,19 @@ export function createWardrobeBlobPostHandler(deps: RouteDependencies) {
           const hostHeader = request.headers.get("host");
           const host = hostHeader ?? new URL(request.url).host;
           const protocol = request.headers.get("x-forwarded-proto") ?? "https";
-          const baseUrl = `${protocol}://${host}`;
-          const tokenPayload = body?.payload?.tokenPayload ?? null;
+          const origin = `${protocol}://${host}`;
+          const tokenPayload = body?.payload?.tokenPayload ?? body?.tokenPayload ?? null;
+
+          console.log("blob callback: token present?", !!tokenPayload);
 
           if (!tokenPayload) {
             console.error("Missing tokenPayload before normalize call");
-            throw new Error("Missing tokenPayload");
+            return;
           }
 
-          console.log("Sending normalize payload:", {
-            hasBlob: !!blob,
-            hasTokenPayload: !!tokenPayload,
-            tokenPayloadLength: tokenPayload?.length,
-          });
-
-          const normalizeResponse = await fetchImpl(`${baseUrl}/api/wardrobe-normalize`, {
+          const normalizeResponse = await fetchImpl(`${origin}/api/wardrobe-normalize`, {
             method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ blob, tokenPayload }),
           });
 
@@ -207,7 +154,7 @@ export function createWardrobeBlobPostHandler(deps: RouteDependencies) {
       },
     };
 
-    if (isUploadCompletedEvent(eventType)) {
+    if (eventType === "blob.upload-completed") {
       try {
         const result = await handleUploadImpl(uploadHandlerArgs);
         return NextResponse.json(result);

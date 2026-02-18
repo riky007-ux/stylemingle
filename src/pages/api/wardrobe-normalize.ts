@@ -1,7 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { put } from "@vercel/blob";
+import { verify } from "jsonwebtoken";
 
-import { verifyBlobTokenPayload } from "@/lib/verify-blob-token";
 import { shouldAttemptNormalization } from "@/lib/wardrobe-blob-upload-handler";
 
 export const config = {
@@ -10,6 +10,9 @@ export const config = {
 
 type NormalizeRequestBody = {
   tokenPayload?: string;
+  payload?: {
+    tokenPayload?: string;
+  };
   blob?: {
     url?: string;
     pathname?: string;
@@ -23,32 +26,26 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  console.log("Normalize body keys:", Object.keys(req.body || {}));
-  console.log("Normalize tokenPayload present:", !!req.body?.tokenPayload);
-
-  const body = (req.body ?? {}) as NormalizeRequestBody & {
-    payload?: {
-      tokenPayload?: string;
-    };
-  };
+  const body = (req.body ?? {}) as NormalizeRequestBody;
   const blob = body.blob;
   const tokenPayload = body.tokenPayload ?? body.payload?.tokenPayload ?? null;
 
   if (!tokenPayload) {
-    return res.status(401).json({ error: "Unauthorized" });
+    return res.status(401).json({ error: "Missing tokenPayload" });
   }
 
-  let userId: string;
+  console.log("normalize: tokenPayload length", tokenPayload?.length);
+
+  let decoded: unknown;
   try {
-    const verified = verifyBlobTokenPayload(tokenPayload);
-    userId = verified.userId;
-  } catch (err) {
-    console.error("Normalize token verification failed:", err);
-    return res.status(401).json({ error: "Unauthorized" });
+    decoded = verify(tokenPayload, process.env.NEXTAUTH_SECRET!);
+  } catch {
+    return res.status(401).json({ error: "Invalid tokenPayload" });
   }
 
+  const userId = (decoded as any)?.userId;
   if (!userId) {
-    return res.status(401).json({ error: "Unauthorized" });
+    return res.status(401).json({ error: "Invalid userId" });
   }
 
   if (!blob?.url || !blob.pathname) {
