@@ -132,8 +132,6 @@ export function createWardrobeBlobPostHandler(deps: RouteDependencies) {
           const origin = `${protocol}://${host}`;
           const tokenPayload = body?.payload?.tokenPayload ?? body?.tokenPayload ?? null;
 
-          console.log("blob callback: token present?", !!tokenPayload);
-
           if (!tokenPayload) {
             console.error("Missing tokenPayload before normalize call");
             return;
@@ -142,7 +140,11 @@ export function createWardrobeBlobPostHandler(deps: RouteDependencies) {
           const normalizeResponse = await fetchImpl(`${origin}/api/wardrobe-normalize`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ blob, tokenPayload }),
+            body: JSON.stringify({
+              eventType: body?.type ?? "blob.upload-completed",
+              blob,
+              tokenPayload,
+            }),
           });
 
           if (!normalizeResponse.ok) {
