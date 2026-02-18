@@ -1,6 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { put } from "@vercel/blob";
 
+import { verifyBlobTokenPayload } from "@/lib/verify-blob-token";
 import { shouldAttemptNormalization } from "@/lib/wardrobe-blob-upload-handler";
 
 export const config = {
@@ -8,7 +9,7 @@ export const config = {
 };
 
 type NormalizeRequestBody = {
-  userId?: string;
+  tokenPayload?: string;
   blob?: {
     url?: string;
     pathname?: string;
@@ -17,18 +18,25 @@ type NormalizeRequestBody = {
 };
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  if (req.headers["x-internal-call"] !== "wardrobe-blob") {
-    return res.status(401).json({ error: "Unauthorized" });
-  }
-
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
     return res.status(405).json({ error: "Method not allowed" });
   }
 
   const body = (req.body ?? {}) as NormalizeRequestBody;
-  const userId = body.userId;
+  const tokenPayload = body.tokenPayload;
   const blob = body.blob;
+
+  if (!tokenPayload) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  let userId: string;
+  try {
+    ({ userId } = verifyBlobTokenPayload(tokenPayload));
+  } catch {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
 
   if (!userId) {
     return res.status(400).json({ error: "Missing userId" });

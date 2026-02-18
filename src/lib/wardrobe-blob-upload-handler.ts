@@ -1,6 +1,8 @@
 import { handleUpload, type HandleUploadBody } from "@vercel/blob/client";
 import { NextResponse } from "next/server.js";
 
+import { signToken } from "@/lib/auth";
+
 const SUPPORTED_IMAGE_MIME_TYPES = new Set([
   "image/jpeg",
   "image/jpg",
@@ -37,17 +39,18 @@ type UploadBody = HandleUploadBody & {
   };
 };
 
-function readUserIdFromTokenPayload(tokenPayload: unknown): string | null {
-  if (typeof tokenPayload !== "string") {
-    return null;
+function readTokenPayload(body: UploadBody): string | null {
+  const payloadToken = body?.payload?.tokenPayload;
+  if (typeof payloadToken === "string" && payloadToken.length > 0) {
+    return payloadToken;
   }
 
-  try {
-    const parsed = JSON.parse(tokenPayload) as { userId?: unknown };
-    return typeof parsed.userId === "string" && parsed.userId.length > 0 ? parsed.userId : null;
-  } catch {
-    return null;
+  const rootToken = (body as { tokenPayload?: unknown })?.tokenPayload;
+  if (typeof rootToken === "string" && rootToken.length > 0) {
+    return rootToken;
   }
+
+  return null;
 }
 
 type CookieStore = {
@@ -77,9 +80,7 @@ export function createWardrobeBlobPostHandler(deps: RouteDependencies) {
     const eventType = body?.type;
 
     let userId: string | null = null;
-    if (eventType === "blob.upload-completed") {
-      userId = readUserIdFromTokenPayload(body?.payload?.tokenPayload);
-    } else {
+    if (eventType !== "blob.upload-completed") {
       const token = deps.getCookieStore().get(deps.authCookieName)?.value;
       if (!token) {
         console.warn("wardrobe/blob unauthorized");
@@ -132,7 +133,7 @@ export function createWardrobeBlobPostHandler(deps: RouteDependencies) {
             "image/heic",
             "image/heif",
           ],
-          tokenPayload: JSON.stringify({ userId }),
+          tokenPayload: signToken(userId),
         };
       },
       onUploadCompleted: async ({ blob }: { blob: { url: string; pathname: string; contentType?: string } }) => {
@@ -150,9 +151,8 @@ export function createWardrobeBlobPostHandler(deps: RouteDependencies) {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
-              "x-internal-call": "wardrobe-blob",
             },
-            body: JSON.stringify({ blob, userId }),
+            body: JSON.stringify({ blob, tokenPayload: readTokenPayload(body) }),
           });
 
           if (!normalizeResponse.ok) {
