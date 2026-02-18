@@ -184,6 +184,12 @@ export function createWardrobeBlobPostHandler(deps: RouteDependencies) {
             throw new Error("Missing tokenPayload");
           }
 
+          console.log("Sending normalize payload:", {
+            hasBlob: !!blob,
+            hasTokenPayload: !!tokenPayload,
+            tokenPayloadLength: tokenPayload?.length,
+          });
+
           const normalizeResponse = await fetchImpl(`${baseUrl}/api/wardrobe-normalize`, {
             method: "POST",
             headers: {

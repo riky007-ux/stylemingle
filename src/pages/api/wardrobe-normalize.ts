@@ -23,7 +23,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  const { blob, tokenPayload } = (req.body ?? {}) as NormalizeRequestBody;
+  console.log("Normalize body keys:", Object.keys(req.body || {}));
+  console.log("Normalize tokenPayload present:", !!req.body?.tokenPayload);
+
+  const body = (req.body ?? {}) as NormalizeRequestBody & {
+    payload?: {
+      tokenPayload?: string;
+    };
+  };
+  const blob = body.blob;
+  const tokenPayload = body.tokenPayload ?? body.payload?.tokenPayload ?? null;
 
   if (!tokenPayload) {
     return res.status(401).json({ error: "Unauthorized" });
@@ -33,7 +42,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   try {
     const verified = verifyBlobTokenPayload(tokenPayload);
     userId = verified.userId;
-  } catch {
+  } catch (err) {
+    console.error("Normalize token verification failed:", err);
     return res.status(401).json({ error: "Unauthorized" });
   }
 
