@@ -6,6 +6,7 @@ const nextConfig = {
         "node_modules/sharp/**/*",
         "node_modules/@img/**/*",
         "node_modules/detect-libc/**/*",
+        "node_modules/semver/**/*",
       ],
     },
   },
