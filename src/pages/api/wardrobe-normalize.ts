@@ -1,6 +1,8 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { put } from "@vercel/blob";
+import sharp from "sharp";
 
+import { decodeHeicToRgba } from "@/lib/decode-heic-to-rgba";
 import { shouldAttemptNormalization } from "@/lib/wardrobe-blob-upload-handler";
 
 export const config = {
@@ -68,29 +70,59 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   try {
-    const sourceResponse = await fetch(blob.url);
-    if (!sourceResponse.ok) {
-      throw new Error(`Failed to read blob: ${sourceResponse.status}`);
+    const extension = blob.pathname.toLowerCase();
+    const callbackContentType = blob.contentType?.toLowerCase() ?? "";
+
+    const isHeic =
+      extension.endsWith(".heic") ||
+      extension.endsWith(".heif") ||
+      callbackContentType === "image/heic" ||
+      callbackContentType === "image/heif";
+
+    const inputBuffer = await fetch(blob.url).then((r) => r.arrayBuffer());
+    const buffer = Buffer.from(inputBuffer);
+
+    if (isHeic) {
+      const { data, width, height } = await decodeHeicToRgba(buffer);
+
+      const jpegBuffer = await sharp(data, {
+        raw: { width, height, channels: 4 },
+      })
+        .jpeg({ quality: 90 })
+        .toBuffer();
+
+      await put(blob.pathname, jpegBuffer, {
+        access: "public",
+        contentType: "image/jpeg",
+      });
+
+      return res.status(200).json({ ok: true, converted: "heic-wasm" });
     }
 
-    const sourceBuffer = Buffer.from(await sourceResponse.arrayBuffer());
-    const sharpModule = await import("sharp");
-    const jpegBuffer = await sharpModule
-      .default(sourceBuffer, { failOn: "none" })
-      .rotate()
-      .jpeg({ quality: 90 })
-      .toBuffer();
+    if (!isHeic) {
+      const jpegBuffer = await sharp(buffer)
+        .jpeg({ quality: 90 })
+        .toBuffer();
 
-    await put(blob.pathname, jpegBuffer, {
-      access: "public",
-      contentType: "image/jpeg",
-      addRandomSuffix: false,
-      allowOverwrite: true,
+      await put(blob.pathname, jpegBuffer, {
+        access: "public",
+        contentType: "image/jpeg",
+      });
+
+      return res.status(200).json({ ok: true, converted: "sharp" });
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("wardrobe/blob normalization failed", {
+      pathname: blob.pathname,
+      contentType: blob.contentType,
+      message,
     });
 
-    return res.status(200).json({ ok: true });
-  } catch (error) {
-    console.error("wardrobe/blob normalization failed", error);
+    if (message.includes("HEIC")) {
+      return res.status(422).json({ error: "HEIC decode failed (wasm)" });
+    }
+
     return res.status(500).json({ error: "Normalization failed" });
   }
 }
