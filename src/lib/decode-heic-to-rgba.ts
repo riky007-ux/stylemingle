@@ -4,50 +4,37 @@ type HeicDecodeResult = {
   height: number;
 };
 
-type LibheifModuleShape = {
-  HeifDecoder?: new () => {
-    decode: (buffer: Buffer) => any[];
-  };
-};
+type LibheifRuntime = { HeifDecoder: new () => any };
 
 const MAX_HEIC_PIXELS = 80_000_000;
 
-let libheifPromise: Promise<LibheifModuleShape> | null = null;
+let libheifPromise: Promise<LibheifRuntime> | null = null;
 
-function describeCandidate(candidate: unknown) {
-  const candidateType = typeof candidate;
-  const candidateKeys =
-    candidate && typeof candidate === "object"
-      ? Object.keys(candidate as Record<string, unknown>).slice(0, 20)
-      : [];
-
-  return { candidateType, candidateKeys };
+function assertLibheifRuntime(candidate: any): asserts candidate is LibheifRuntime {
+  if (!candidate || typeof candidate.HeifDecoder !== "function") {
+    const keys = candidate && typeof candidate === "object" ? Object.keys(candidate).slice(0, 20) : [];
+    console.warn("HEIC decoder unavailable: HeifDecoder missing", {
+      candidateType: typeof candidate,
+      keys,
+    });
+    throw new Error(
+      `libheif import shape invalid: HeifDecoder missing (type=${typeof candidate}, keys=${keys.join(",")})`,
+    );
+  }
 }
 
 async function getLibheif() {
   if (!libheifPromise) {
     libheifPromise = import("libheif-js/wasm-bundle")
-      .then((module) => {
-        const lib = module?.default ?? module;
-        const candidate = lib?.default ?? lib;
-
-        if (!candidate?.HeifDecoder || typeof candidate.HeifDecoder !== "function") {
-          const { candidateType, candidateKeys } = describeCandidate(candidate);
-          console.warn("HEIC decoder unavailable: HeifDecoder missing", {
-            candidateType,
-            candidateKeys,
-          });
-
-          throw new Error(
-            `Invalid libheif export shape: type=${candidateType} keys=${candidateKeys.join(",")}`,
-          );
-        }
-
-        return candidate as LibheifModuleShape;
+      .then((mod) => {
+        const lib = (mod as any)?.default ?? mod;
+        const candidate = (lib as any)?.default ?? lib;
+        assertLibheifRuntime(candidate);
+        return candidate;
       })
-      .catch((error) => {
+      .catch((err) => {
         libheifPromise = null;
-        throw error;
+        throw err;
       });
   }
 
