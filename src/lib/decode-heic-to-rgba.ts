@@ -6,8 +6,20 @@ type HeicDecodeResult = {
 
 const MAX_HEIC_PIXELS = 80_000_000;
 
+let libheifPromise: Promise<any> | null = null;
+
+async function getLibheif() {
+  if (!libheifPromise) {
+    libheifPromise = import("libheif-js/libheif-wasm/libheif-bundle.mjs").then(
+      (module) => module.default ?? module,
+    );
+  }
+
+  return libheifPromise;
+}
+
 export async function decodeHeicToRgba(buffer: Buffer): Promise<HeicDecodeResult> {
-  const libheif = (0, eval)("require")("libheif-js/wasm-bundle");
+  const libheif = await getLibheif();
   const decoder = new libheif.HeifDecoder();
   const images = decoder.decode(buffer);
 
