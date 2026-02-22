@@ -4,15 +4,51 @@ type HeicDecodeResult = {
   height: number;
 };
 
+type LibheifModuleShape = {
+  HeifDecoder?: new () => {
+    decode: (buffer: Buffer) => any[];
+  };
+};
+
 const MAX_HEIC_PIXELS = 80_000_000;
 
-let libheifPromise: Promise<any> | null = null;
+let libheifPromise: Promise<LibheifModuleShape> | null = null;
+
+function describeCandidate(candidate: unknown) {
+  const candidateType = typeof candidate;
+  const candidateKeys =
+    candidate && typeof candidate === "object"
+      ? Object.keys(candidate as Record<string, unknown>).slice(0, 20)
+      : [];
+
+  return { candidateType, candidateKeys };
+}
 
 async function getLibheif() {
   if (!libheifPromise) {
-    libheifPromise = import("libheif-js/libheif-wasm/libheif-bundle.mjs").then(
-      (module) => module.default ?? module,
-    );
+    libheifPromise = import("libheif-js/wasm-bundle")
+      .then((module) => {
+        const lib = module?.default ?? module;
+        const candidate = lib?.default ?? lib;
+
+        if (!candidate?.HeifDecoder || typeof candidate.HeifDecoder !== "function") {
+          const { candidateType, candidateKeys } = describeCandidate(candidate);
+          console.warn("HEIC decoder unavailable: HeifDecoder missing", {
+            candidateType,
+            candidateKeys,
+          });
+
+          throw new Error(
+            `Invalid libheif export shape: type=${candidateType} keys=${candidateKeys.join(",")}`,
+          );
+        }
+
+        return candidate as LibheifModuleShape;
+      })
+      .catch((error) => {
+        libheifPromise = null;
+        throw error;
+      });
   }
 
   return libheifPromise;
