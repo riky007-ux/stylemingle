@@ -15,6 +15,15 @@ function getFileExtension(pathname: string) {
   return match?.[1] ?? "";
 }
 
+function getVercelBypassHeaders() {
+  const bypass = process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
+  if (!bypass) {
+    return {};
+  }
+
+  return { "x-vercel-protection-bypass": bypass };
+}
+
 export function shouldAttemptNormalization(contentType: string | undefined, pathname: string) {
   const normalizedContentType = contentType?.toLowerCase();
   if (normalizedContentType && SUPPORTED_IMAGE_MIME_TYPES.has(normalizedContentType)) {
@@ -126,10 +135,8 @@ export function createWardrobeBlobPostHandler(deps: RouteDependencies) {
         }
 
         try {
-          const hostHeader = request.headers.get("host");
-          const host = hostHeader ?? new URL(request.url).host;
-          const protocol = request.headers.get("x-forwarded-proto") ?? "https";
-          const origin = `${protocol}://${host}`;
+          const origin = new URL(request.url).origin;
+          const normalizeUrl = new URL("/api/wardrobe-normalize", origin);
           const tokenPayload = body?.payload?.tokenPayload ?? body?.tokenPayload ?? null;
 
           if (!tokenPayload) {
@@ -137,9 +144,12 @@ export function createWardrobeBlobPostHandler(deps: RouteDependencies) {
             return;
           }
 
-          const normalizeResponse = await fetchImpl(`${origin}/api/wardrobe-normalize`, {
+          const normalizeResponse = await fetchImpl(normalizeUrl, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: {
+              ...getVercelBypassHeaders(),
+              "content-type": "application/json",
+            },
             body: JSON.stringify({
               eventType: body?.type ?? "blob.upload-completed",
               blob,
@@ -148,6 +158,17 @@ export function createWardrobeBlobPostHandler(deps: RouteDependencies) {
           });
 
           if (!normalizeResponse.ok) {
+            const responseContentType = normalizeResponse.headers.get("content-type") ?? "";
+            const htmlPreview = responseContentType.includes("text/html")
+              ? (await normalizeResponse.text()).slice(0, 80)
+              : undefined;
+
+            console.error("Normalization route failed", {
+              status: normalizeResponse.status,
+              contentType: responseContentType,
+              htmlPreview,
+            });
+
             throw new Error(`Normalization route failed: ${normalizeResponse.status}`);
           }
         } catch (error) {
