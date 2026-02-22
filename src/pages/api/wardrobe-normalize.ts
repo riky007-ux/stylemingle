@@ -22,6 +22,33 @@ type NormalizeRequestBody = {
   };
 };
 
+const HEIF_BRANDS = new Set(["heic", "heix", "hevc", "hevx", "mif1", "msf1"]);
+
+function hasHeifSignature(buffer: Buffer) {
+  if (buffer.length < 12) {
+    return false;
+  }
+
+  const boxType = buffer.toString("ascii", 4, 8);
+  if (boxType !== "ftyp") {
+    return false;
+  }
+
+  const majorBrand = buffer.toString("ascii", 8, 12);
+  if (HEIF_BRANDS.has(majorBrand)) {
+    return true;
+  }
+
+  for (let index = 16; index + 4 <= buffer.length; index += 4) {
+    const compatibleBrand = buffer.toString("ascii", index, index + 4);
+    if (HEIF_BRANDS.has(compatibleBrand)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
@@ -73,14 +100,30 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const extension = blob.pathname.toLowerCase();
     const callbackContentType = blob.contentType?.toLowerCase() ?? "";
 
-    const isHeic =
+    const inputBuffer = await fetch(blob.url).then((r) => r.arrayBuffer());
+    const buffer = Buffer.from(inputBuffer);
+
+    const metadataIndicatesJpeg =
+      extension.endsWith(".jpg") ||
+      extension.endsWith(".jpeg") ||
+      callbackContentType === "image/jpeg" ||
+      callbackContentType === "image/jpg";
+
+    const metadataIndicatesHeic =
       extension.endsWith(".heic") ||
       extension.endsWith(".heif") ||
       callbackContentType === "image/heic" ||
       callbackContentType === "image/heif";
 
-    const inputBuffer = await fetch(blob.url).then((r) => r.arrayBuffer());
-    const buffer = Buffer.from(inputBuffer);
+    const signatureIndicatesHeif = hasHeifSignature(buffer);
+    const isHeic = metadataIndicatesHeic || signatureIndicatesHeif;
+
+    if (signatureIndicatesHeif && metadataIndicatesJpeg) {
+      console.warn("HEIC signature mismatch: pathname/contentType indicated jpeg", {
+        pathname: blob.pathname,
+        contentType: blob.contentType,
+      });
+    }
 
     if (isHeic) {
       const { data, width, height } = await decodeHeicToRgba(buffer);
@@ -93,6 +136,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
       await put(blob.pathname, jpegBuffer, {
         access: "public",
+        addRandomSuffix: false,
+        allowOverwrite: true,
         contentType: "image/jpeg",
       });
 
@@ -106,6 +151,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
       await put(blob.pathname, jpegBuffer, {
         access: "public",
+        addRandomSuffix: false,
+        allowOverwrite: true,
         contentType: "image/jpeg",
       });
 
