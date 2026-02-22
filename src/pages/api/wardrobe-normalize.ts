@@ -1,5 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { put } from "@vercel/blob";
+import jwt from "jsonwebtoken";
 import sharp from "sharp";
 
 import { decodeHeicToRgba } from "@/lib/decode-heic-to-rgba";
@@ -23,6 +24,34 @@ type NormalizeRequestBody = {
 };
 
 const HEIF_BRANDS = new Set(["heic", "heix", "hevc", "hevx", "mif1", "msf1"]);
+
+type WardrobeNormalizeTokenClaims = {
+  purpose: "wardrobe-normalize";
+  pathname: string;
+  userId: string;
+};
+
+function verifyWardrobeNormalizeToken(token: string) {
+  const secret = process.env.NEXTAUTH_SECRET;
+  if (!secret) {
+    return null;
+  }
+
+  try {
+    const decoded = jwt.verify(token, secret) as Partial<WardrobeNormalizeTokenClaims>;
+    if (
+      decoded.purpose !== "wardrobe-normalize" ||
+      typeof decoded.pathname !== "string" ||
+      typeof decoded.userId !== "string"
+    ) {
+      return null;
+    }
+
+    return decoded as WardrobeNormalizeTokenClaims;
+  } catch {
+    return null;
+  }
+}
 
 function hasHeifSignature(buffer: Buffer) {
   if (buffer.length < 12) {
@@ -64,10 +93,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(400).json({ error: "Invalid eventType" });
   }
 
-  if (!tokenPayload) {
-    return res.status(400).json({ error: "Missing tokenPayload" });
-  }
-
   if (!blob?.url || !blob.pathname) {
     return res.status(400).json({ error: "Missing blob payload" });
   }
@@ -90,6 +115,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   if (!blob.pathname.startsWith("wardrobe/")) {
     return res.status(400).json({ error: "Invalid blob pathname" });
+  }
+
+  if (typeof tokenPayload !== "string") {
+    console.warn("normalize auth failed: invalid token or pathname mismatch", {
+      pathname: blob.pathname,
+    });
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  const claims = verifyWardrobeNormalizeToken(tokenPayload);
+  if (!claims || claims.pathname !== blob.pathname) {
+    console.warn("normalize auth failed: invalid token or pathname mismatch", {
+      pathname: blob.pathname,
+    });
+    return res.status(401).json({ error: "Unauthorized" });
   }
 
   if (!shouldAttemptNormalization(blob.contentType, blob.pathname)) {
