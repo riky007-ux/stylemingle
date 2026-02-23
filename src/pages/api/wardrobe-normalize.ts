@@ -78,6 +78,21 @@ function hasHeifSignature(buffer: Buffer) {
   return false;
 }
 
+function jpegMagicHex(buf: Buffer) {
+  if (!buf || buf.length < 3) {
+    return "too-short";
+  }
+
+  return buf.subarray(0, 3).toString("hex");
+}
+
+function assertIsJpeg(buf: Buffer, label: string) {
+  const hex = jpegMagicHex(buf);
+  if (hex !== "ffd8ff") {
+    throw new Error(`${label} is not JPEG: magic=${hex}`);
+  }
+}
+
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
@@ -140,8 +155,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const extension = blob.pathname.toLowerCase();
     const callbackContentType = blob.contentType?.toLowerCase() ?? "";
 
-    const inputBuffer = await fetch(blob.url).then((r) => r.arrayBuffer());
-    const buffer = Buffer.from(inputBuffer);
+    const downloadedArrayBuffer = await fetch(blob.url).then((response) => response.arrayBuffer());
+    const inputBuffer = Buffer.from(downloadedArrayBuffer);
 
     const metadataIndicatesJpeg =
       extension.endsWith(".jpg") ||
@@ -155,7 +170,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       callbackContentType === "image/heic" ||
       callbackContentType === "image/heif";
 
-    const signatureIndicatesHeif = hasHeifSignature(buffer);
+    const signatureIndicatesHeif = hasHeifSignature(inputBuffer);
     const isHeic = metadataIndicatesHeic || signatureIndicatesHeif;
 
     if (signatureIndicatesHeif && metadataIndicatesJpeg) {
@@ -165,39 +180,71 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       });
     }
 
-    if (isHeic) {
-      const { data, width, height } = await decodeHeicToRgba(buffer);
+    let outputJpeg: Buffer;
 
-      const jpegBuffer = await sharp(data, {
+    if (isHeic) {
+      const { data, width, height } = await decodeHeicToRgba(inputBuffer);
+
+      outputJpeg = await sharp(data, {
         raw: { width, height, channels: 4 },
       })
         .jpeg({ quality: 90 })
         .toBuffer();
 
-      await put(blob.pathname, jpegBuffer, {
+      assertIsJpeg(outputJpeg, "normalize outputJpeg");
+
+      const written = await put(blob.pathname, outputJpeg, {
         access: "public",
         addRandomSuffix: false,
         allowOverwrite: true,
         contentType: "image/jpeg",
+      });
+
+      console.log("normalize heic write", {
+        pathname: blob.pathname,
+        inputMagic: jpegMagicHex(inputBuffer),
+        outputMagic: jpegMagicHex(outputJpeg),
+        beforeUrl: blob.url,
+        afterUrl: written.url,
+      });
+
+      if (written.url !== blob.url) {
+        console.warn("normalize heic write url changed", {
+          pathname: blob.pathname,
+          beforeUrl: blob.url,
+          afterUrl: written.url,
+        });
+      }
+
+      const verifyRes = await fetch(written.url, {
+        headers: {
+          Range: "bytes=0-2",
+          "cache-control": "no-cache",
+        },
+      });
+      const verifyBuf = Buffer.from(await verifyRes.arrayBuffer());
+      console.log("normalize post-put verify", {
+        status: verifyRes.status,
+        magic: jpegMagicHex(verifyBuf),
       });
 
       return res.status(200).json({ ok: true, converted: "heic-wasm" });
     }
 
-    if (!isHeic) {
-      const jpegBuffer = await sharp(buffer)
-        .jpeg({ quality: 90 })
-        .toBuffer();
+    outputJpeg = await sharp(inputBuffer)
+      .jpeg({ quality: 90 })
+      .toBuffer();
 
-      await put(blob.pathname, jpegBuffer, {
-        access: "public",
-        addRandomSuffix: false,
-        allowOverwrite: true,
-        contentType: "image/jpeg",
-      });
+    assertIsJpeg(outputJpeg, "normalize outputJpeg");
 
-      return res.status(200).json({ ok: true, converted: "sharp" });
-    }
+    await put(blob.pathname, outputJpeg, {
+      access: "public",
+      addRandomSuffix: false,
+      allowOverwrite: true,
+      contentType: "image/jpeg",
+    });
+
+    return res.status(200).json({ ok: true, converted: "sharp" });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error("wardrobe/blob normalization failed", {
