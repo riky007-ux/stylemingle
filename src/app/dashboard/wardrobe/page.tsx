@@ -2,7 +2,7 @@
 
 export const dynamic = "force-dynamic";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { upload } from "@vercel/blob/client";
 import Image from "next/image";
 
@@ -210,60 +210,122 @@ function buildThumbnailUrl(imageUrl: string) {
 }
 
 
-function addCacheBuster(url: string) {
-  try {
-    const parsed = new URL(url);
-    parsed.searchParams.set("_sm", String(Date.now()));
+function addCacheBuster(url: string, stamp: number) {
+  const parsed = new URL(url, window.location.origin);
+  parsed.searchParams.set("_sm", String(stamp));
+
+  const hasProtocol = /^[a-zA-Z][a-zA-Z\d+.-]*:/.test(url);
+  if (hasProtocol) {
     return parsed.toString();
-  } catch {
-    const separator = url.includes("?") ? "&" : "?";
-    return `${url}${separator}_sm=${Date.now()}`;
   }
+
+  const normalizedPath = url.startsWith("/")
+    ? parsed.pathname
+    : parsed.pathname.replace(/^\/+/, "");
+
+  return `${normalizedPath}${parsed.search}${parsed.hash}`;
 }
 
 type ResilientImageProps = {
   src: string;
   alt: string;
   className?: string;
-  maxRetries?: number;
-  baseDelayMs?: number;
-  maxDelayMs?: number;
 };
+
+const MAX_TOTAL_RETRY_MS = 25_000;
+const BASE_DELAY_MS = 600;
+const MAX_DELAY_MS = 3000;
 
 function ResilientImage({
   src,
   alt,
   className,
-  maxRetries = 6,
-  baseDelayMs = 600,
-  maxDelayMs = 3000,
 }: ResilientImageProps) {
   const [currentSrc, setCurrentSrc] = useState(src);
   const [attempt, setAttempt] = useState(0);
   const [status, setStatus] = useState<"loading" | "retrying" | "loaded" | "failed">("loading");
   const retryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasLoadedRef = useRef(false);
+  const retryWindowStartRef = useRef<number | null>(null);
+
+  const clearRetryTimer = useCallback(() => {
+    if (retryTimeoutRef.current) {
+      clearTimeout(retryTimeoutRef.current);
+      retryTimeoutRef.current = null;
+    }
+  }, []);
 
   useEffect(() => {
+    clearRetryTimer();
     hasLoadedRef.current = false;
+    retryWindowStartRef.current = null;
     setCurrentSrc(src);
     setAttempt(0);
     setStatus("loading");
 
     return () => {
-      if (retryTimeoutRef.current) {
-        clearTimeout(retryTimeoutRef.current);
-        retryTimeoutRef.current = null;
-      }
+      clearRetryTimer();
     };
-  }, [src]);
+  }, [clearRetryTimer, src]);
+
+  const scheduleRetry = (currentAttempt: number) => {
+    if (hasLoadedRef.current) {
+      return;
+    }
+
+    const retryWindowStart = retryWindowStartRef.current ?? Date.now();
+    retryWindowStartRef.current = retryWindowStart;
+
+    const elapsedMs = Date.now() - retryWindowStart;
+    const remainingMs = MAX_TOTAL_RETRY_MS - elapsedMs;
+    if (remainingMs <= 0) {
+      clearRetryTimer();
+      setStatus("failed");
+      return;
+    }
+
+    const nextDelayMs = Math.min(BASE_DELAY_MS * 2 ** currentAttempt, MAX_DELAY_MS, remainingMs);
+    setStatus("retrying");
+
+    if (process.env.NEXT_PUBLIC_SM_UPLOAD_DIAGNOSTICS === "1") {
+      console.debug("ResilientImage retry", {
+        attempt: currentAttempt + 1,
+        elapsedMs,
+        nextDelayMs,
+      });
+    }
+
+    clearRetryTimer();
+    retryTimeoutRef.current = setTimeout(() => {
+      if (hasLoadedRef.current) {
+        return;
+      }
+
+      const now = Date.now();
+      const elapsed = now - (retryWindowStartRef.current ?? now);
+      if (elapsed >= MAX_TOTAL_RETRY_MS) {
+        setStatus("failed");
+        clearRetryTimer();
+        return;
+      }
+
+      setAttempt((previous) => previous + 1);
+      setCurrentSrc(addCacheBuster(src, now));
+    }, nextDelayMs);
+  };
+
+  const restartRetries = () => {
+    clearRetryTimer();
+    hasLoadedRef.current = false;
+    retryWindowStartRef.current = Date.now();
+    setAttempt(0);
+    setStatus("retrying");
+    setCurrentSrc(addCacheBuster(src, Date.now()));
+  };
 
   const handleLoad = () => {
     hasLoadedRef.current = true;
-    if (retryTimeoutRef.current) {
-      clearTimeout(retryTimeoutRef.current);
-      retryTimeoutRef.current = null;
-    }
+    clearRetryTimer();
     setStatus("loaded");
   };
 
@@ -272,32 +334,21 @@ function ResilientImage({
       return;
     }
 
-    setAttempt((previousAttempt) => {
-      if (previousAttempt >= maxRetries) {
-        setStatus("failed");
-        return previousAttempt;
-      }
-
-      const delay = Math.min(baseDelayMs * 2 ** previousAttempt, maxDelayMs);
-      setStatus("retrying");
-
-      if (retryTimeoutRef.current) {
-        clearTimeout(retryTimeoutRef.current);
-      }
-
-      retryTimeoutRef.current = setTimeout(() => {
-        setCurrentSrc(addCacheBuster(src));
-      }, delay);
-
-      return previousAttempt + 1;
-    });
+    scheduleRetry(attempt);
   };
 
   return (
     <>
       {status === "failed" ? (
-        <div className="flex h-full w-full items-center justify-center px-3 text-center text-sm text-zinc-600">
+        <div className="flex h-full w-full flex-col items-center justify-center gap-2 px-3 text-center text-sm text-zinc-600">
           <div className="font-medium">Preview unavailable</div>
+          <button
+            type="button"
+            onClick={restartRetries}
+            className="rounded-md border border-zinc-300 bg-white/90 px-2.5 py-1 text-xs font-medium text-zinc-700 transition hover:bg-white focus:outline-none focus:ring-2 focus:ring-zinc-400"
+          >
+            Try again
+          </button>
         </div>
       ) : (
         <Image
@@ -317,7 +368,11 @@ function ResilientImage({
       )}
 
       {status === "retrying" && (
-        <div className="pointer-events-none absolute left-2 top-2 rounded bg-black/60 px-2 py-1 text-[11px] font-medium text-white">
+        <div
+          className="pointer-events-none absolute left-2 top-2 inline-flex items-center gap-1.5 rounded bg-black/60 px-2 py-1 text-[11px] font-medium text-white"
+          aria-live="polite"
+        >
+          <span className="h-3 w-3 animate-spin rounded-full border border-white/40 border-t-white" />
           Processing…
         </div>
       )}
