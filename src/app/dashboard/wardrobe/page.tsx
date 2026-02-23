@@ -209,6 +209,104 @@ function buildThumbnailUrl(imageUrl: string) {
   }
 }
 
+
+function addCacheBuster(url: string) {
+  try {
+    const parsed = new URL(url);
+    parsed.searchParams.set("_sm", String(Date.now()));
+    return parsed.toString();
+  } catch {
+    const separator = url.includes("?") ? "&" : "?";
+    return `${url}${separator}_sm=${Date.now()}`;
+  }
+}
+
+type ResilientImageProps = {
+  src: string;
+  alt: string;
+  className?: string;
+  maxRetries?: number;
+  baseDelayMs?: number;
+  maxDelayMs?: number;
+};
+
+function ResilientImage({
+  src,
+  alt,
+  className,
+  maxRetries = 6,
+  baseDelayMs = 600,
+  maxDelayMs = 3000,
+}: ResilientImageProps) {
+  const [currentSrc, setCurrentSrc] = useState(src);
+  const [attempt, setAttempt] = useState(0);
+  const [status, setStatus] = useState<"loading" | "retrying" | "loaded" | "failed">("loading");
+  const retryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    setCurrentSrc(src);
+    setAttempt(0);
+    setStatus("loading");
+
+    return () => {
+      if (retryTimeoutRef.current) {
+        clearTimeout(retryTimeoutRef.current);
+        retryTimeoutRef.current = null;
+      }
+    };
+  }, [src]);
+
+  const handleError = () => {
+    if (attempt >= maxRetries) {
+      setStatus("failed");
+      return;
+    }
+
+    const delay = Math.min(baseDelayMs * 2 ** attempt, maxDelayMs);
+    setStatus("retrying");
+
+    if (retryTimeoutRef.current) {
+      clearTimeout(retryTimeoutRef.current);
+    }
+
+    retryTimeoutRef.current = setTimeout(() => {
+      setAttempt((previous) => previous + 1);
+      setCurrentSrc(addCacheBuster(src));
+    }, delay);
+  };
+
+  return (
+    <>
+      {status === "failed" ? (
+        <div className="flex h-full w-full items-center justify-center px-3 text-center text-sm text-zinc-600">
+          <div className="font-medium">Preview unavailable</div>
+        </div>
+      ) : (
+        <Image
+          key={currentSrc}
+          src={currentSrc}
+          alt={alt}
+          width={400}
+          height={400}
+          className={className}
+          sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
+          loading="lazy"
+          referrerPolicy="no-referrer"
+          onLoad={() => setStatus("loaded")}
+          onError={handleError}
+          unoptimized
+        />
+      )}
+
+      {status === "retrying" && (
+        <div className="pointer-events-none absolute left-2 top-2 rounded bg-black/60 px-2 py-1 text-[11px] font-medium text-white">
+          Processing…
+        </div>
+      )}
+    </>
+  );
+}
+
 function WardrobeItemCard({
   item,
   onDelete,
@@ -216,7 +314,6 @@ function WardrobeItemCard({
   item: WardrobeItem;
   onDelete: (id: string) => Promise<void>;
 }) {
-  const [imageError, setImageError] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
   const label = buildItemLabel(item);
@@ -224,25 +321,11 @@ function WardrobeItemCard({
 
   return (
     <div className="relative aspect-square w-full overflow-hidden rounded-xl bg-zinc-100">
-      {imageError ? (
-        <div className="flex h-full w-full flex-col items-center justify-center px-3 text-center text-sm text-zinc-600">
-          <div className="font-medium">Preview unavailable</div>
-          <div className="mt-1 break-words text-xs text-zinc-500">{label}</div>
-        </div>
-      ) : (
-        <Image
-          src={thumbnailUrl}
-          alt={label}
-          width={400}
-          height={400}
-          className="h-full w-full object-cover pointer-events-none"
-          sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
-          loading="lazy"
-          referrerPolicy="no-referrer"
-          onError={() => setImageError(true)}
-          unoptimized
-        />
-      )}
+      <ResilientImage
+        src={thumbnailUrl}
+        alt={label}
+        className="h-full w-full object-cover pointer-events-none"
+      />
 
       <button
         type="button"
