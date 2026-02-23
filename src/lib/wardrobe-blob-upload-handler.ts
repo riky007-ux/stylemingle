@@ -1,4 +1,5 @@
 import { handleUpload, type HandleUploadBody } from "@vercel/blob/client";
+import jwt from "jsonwebtoken";
 import { NextResponse } from "next/server.js";
 
 const SUPPORTED_IMAGE_MIME_TYPES = new Set([
@@ -13,6 +14,35 @@ const SUPPORTED_IMAGE_MIME_TYPES = new Set([
 function getFileExtension(pathname: string) {
   const match = pathname.toLowerCase().match(/\.([a-z0-9]+)$/);
   return match?.[1] ?? "";
+}
+
+function buildNormalizeHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {
+    "content-type": "application/json",
+  };
+  const bypass = process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
+  if (bypass) {
+    headers["x-vercel-protection-bypass"] = bypass;
+  }
+
+  return headers;
+}
+
+function signWardrobeNormalizeToken(userId: string, pathname: string) {
+  const secret = process.env.NEXTAUTH_SECRET;
+  if (!secret) {
+    throw new Error("Missing NEXTAUTH_SECRET");
+  }
+
+  return jwt.sign(
+    {
+      purpose: "wardrobe-normalize",
+      pathname,
+      userId,
+    },
+    secret,
+    { expiresIn: "15m" },
+  );
 }
 
 export function shouldAttemptNormalization(contentType: string | undefined, pathname: string) {
@@ -33,6 +63,7 @@ type UploadBody = HandleUploadBody & {
       pathname: string;
       contentType?: string;
     };
+    pathname?: string;
     tokenPayload?: string;
   };
 };
@@ -109,6 +140,11 @@ export function createWardrobeBlobPostHandler(deps: RouteDependencies) {
           throw new Error("Unauthorized");
         }
 
+        const pathname = body?.payload?.pathname;
+        if (!pathname) {
+          throw new Error("Missing pathname");
+        }
+
         return {
           allowedContentTypes: [
             "image/jpeg",
@@ -117,7 +153,7 @@ export function createWardrobeBlobPostHandler(deps: RouteDependencies) {
             "image/heic",
             "image/heif",
           ],
-          tokenPayload: JSON.stringify({ userId }),
+          tokenPayload: signWardrobeNormalizeToken(userId, pathname),
         };
       },
       onUploadCompleted: async ({ blob }: { blob: { url: string; pathname: string; contentType?: string } }) => {
@@ -126,10 +162,8 @@ export function createWardrobeBlobPostHandler(deps: RouteDependencies) {
         }
 
         try {
-          const hostHeader = request.headers.get("host");
-          const host = hostHeader ?? new URL(request.url).host;
-          const protocol = request.headers.get("x-forwarded-proto") ?? "https";
-          const origin = `${protocol}://${host}`;
+          const origin = new URL(request.url).origin;
+          const normalizeUrl = new URL("/api/wardrobe-normalize", origin);
           const tokenPayload = body?.payload?.tokenPayload ?? body?.tokenPayload ?? null;
 
           if (!tokenPayload) {
@@ -137,9 +171,9 @@ export function createWardrobeBlobPostHandler(deps: RouteDependencies) {
             return;
           }
 
-          const normalizeResponse = await fetchImpl(`${origin}/api/wardrobe-normalize`, {
+          const normalizeResponse = await fetchImpl(normalizeUrl, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: buildNormalizeHeaders(),
             body: JSON.stringify({
               eventType: body?.type ?? "blob.upload-completed",
               blob,
@@ -148,6 +182,17 @@ export function createWardrobeBlobPostHandler(deps: RouteDependencies) {
           });
 
           if (!normalizeResponse.ok) {
+            const responseContentType = normalizeResponse.headers.get("content-type") ?? "";
+            const htmlPreview = responseContentType.includes("text/html")
+              ? (await normalizeResponse.text()).slice(0, 80)
+              : undefined;
+
+            console.error("Normalization route failed", {
+              status: normalizeResponse.status,
+              contentType: responseContentType,
+              htmlPreview,
+            });
+
             throw new Error(`Normalization route failed: ${normalizeResponse.status}`);
           }
         } catch (error) {
