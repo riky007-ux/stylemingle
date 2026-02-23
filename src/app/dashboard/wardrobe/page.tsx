@@ -242,8 +242,10 @@ function ResilientImage({
   const [attempt, setAttempt] = useState(0);
   const [status, setStatus] = useState<"loading" | "retrying" | "loaded" | "failed">("loading");
   const retryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hasLoadedRef = useRef(false);
 
   useEffect(() => {
+    hasLoadedRef.current = false;
     setCurrentSrc(src);
     setAttempt(0);
     setStatus("loading");
@@ -256,23 +258,39 @@ function ResilientImage({
     };
   }, [src]);
 
+  const handleLoad = () => {
+    hasLoadedRef.current = true;
+    if (retryTimeoutRef.current) {
+      clearTimeout(retryTimeoutRef.current);
+      retryTimeoutRef.current = null;
+    }
+    setStatus("loaded");
+  };
+
   const handleError = () => {
-    if (attempt >= maxRetries) {
-      setStatus("failed");
+    if (hasLoadedRef.current) {
       return;
     }
 
-    const delay = Math.min(baseDelayMs * 2 ** attempt, maxDelayMs);
-    setStatus("retrying");
+    setAttempt((previousAttempt) => {
+      if (previousAttempt >= maxRetries) {
+        setStatus("failed");
+        return previousAttempt;
+      }
 
-    if (retryTimeoutRef.current) {
-      clearTimeout(retryTimeoutRef.current);
-    }
+      const delay = Math.min(baseDelayMs * 2 ** previousAttempt, maxDelayMs);
+      setStatus("retrying");
 
-    retryTimeoutRef.current = setTimeout(() => {
-      setAttempt((previous) => previous + 1);
-      setCurrentSrc(addCacheBuster(src));
-    }, delay);
+      if (retryTimeoutRef.current) {
+        clearTimeout(retryTimeoutRef.current);
+      }
+
+      retryTimeoutRef.current = setTimeout(() => {
+        setCurrentSrc(addCacheBuster(src));
+      }, delay);
+
+      return previousAttempt + 1;
+    });
   };
 
   return (
@@ -292,7 +310,7 @@ function ResilientImage({
           sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
           loading="lazy"
           referrerPolicy="no-referrer"
-          onLoad={() => setStatus("loaded")}
+          onLoad={handleLoad}
           onError={handleError}
           unoptimized
         />

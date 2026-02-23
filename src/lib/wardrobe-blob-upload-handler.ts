@@ -16,13 +16,27 @@ function getFileExtension(pathname: string) {
   return match?.[1] ?? "";
 }
 
-function buildNormalizeHeaders(): Record<string, string> {
+function shouldIncludePreviewBypass(normalizeUrl: URL, requestUrl: string) {
+  const bypassSecret = process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
+  if (process.env.VERCEL_ENV !== "preview" || !bypassSecret) {
+    return false;
+  }
+
+  try {
+    return normalizeUrl.origin === new URL(requestUrl).origin;
+  } catch {
+    return false;
+  }
+}
+
+function buildNormalizeHeaders(normalizeUrl: URL, requestUrl: string): Record<string, string> {
   const headers: Record<string, string> = {
     "content-type": "application/json",
   };
-  const bypass = process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
-  if (bypass) {
-    headers["x-vercel-protection-bypass"] = bypass;
+
+  const bypassSecret = process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
+  if (bypassSecret && shouldIncludePreviewBypass(normalizeUrl, requestUrl)) {
+    headers["x-vercel-protection-bypass"] = bypassSecret;
   }
 
   return headers;
@@ -173,7 +187,7 @@ export function createWardrobeBlobPostHandler(deps: RouteDependencies) {
 
           const normalizeResponse = await fetchImpl(normalizeUrl, {
             method: "POST",
-            headers: buildNormalizeHeaders(),
+            headers: buildNormalizeHeaders(normalizeUrl, request.url),
             body: JSON.stringify({
               eventType: body?.type ?? "blob.upload-completed",
               blob,
