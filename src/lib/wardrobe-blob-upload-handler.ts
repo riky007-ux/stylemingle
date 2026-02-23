@@ -17,24 +17,13 @@ function getFileExtension(pathname: string) {
 }
 
 function shouldIncludePreviewBypass(normalizeUrl: URL, requestUrl: string, bypassSecret: string) {
-  if (process.env.VERCEL_ENV !== "preview") {
-    return false;
-  }
-
-  const vercelUrl = process.env.VERCEL_URL;
-  if (!vercelUrl) {
+  if (process.env.VERCEL_ENV !== "preview" || !bypassSecret) {
     return false;
   }
 
   try {
-    const previewOrigin = `https://${vercelUrl}`;
     const requestOrigin = new URL(requestUrl).origin;
-
-    return (
-      Boolean(bypassSecret) &&
-      normalizeUrl.origin === previewOrigin &&
-      requestOrigin === previewOrigin
-    );
+    return normalizeUrl.origin === requestOrigin;
   } catch {
     return false;
   }
@@ -217,6 +206,20 @@ export function createWardrobeBlobPostHandler(deps: RouteDependencies) {
               contentType: responseContentType,
               htmlPreview,
             });
+
+            if (process.env.SM_UPLOAD_DIAGNOSTICS === "1") {
+              const requestOrigin = new URL(request.url).origin;
+              console.warn("Normalization route diagnostics", {
+                status: normalizeResponse.status,
+                requestOrigin,
+                normalizeOrigin: normalizeUrl.origin,
+                usedBypass: shouldIncludePreviewBypass(
+                  normalizeUrl,
+                  request.url,
+                  process.env.VERCEL_AUTOMATION_BYPASS_SECRET ?? "",
+                ),
+              });
+            }
 
             throw new Error(`Normalization route failed: ${normalizeResponse.status}`);
           }
