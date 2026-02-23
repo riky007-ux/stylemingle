@@ -16,14 +16,25 @@ function getFileExtension(pathname: string) {
   return match?.[1] ?? "";
 }
 
-function shouldIncludePreviewBypass(normalizeUrl: URL, requestUrl: string) {
-  const bypassSecret = process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
-  if (process.env.VERCEL_ENV !== "preview" || !bypassSecret) {
+function shouldIncludePreviewBypass(normalizeUrl: URL, requestUrl: string, bypassSecret: string) {
+  if (process.env.VERCEL_ENV !== "preview") {
+    return false;
+  }
+
+  const vercelUrl = process.env.VERCEL_URL;
+  if (!vercelUrl) {
     return false;
   }
 
   try {
-    return normalizeUrl.origin === new URL(requestUrl).origin;
+    const previewOrigin = `https://${vercelUrl}`;
+    const requestOrigin = new URL(requestUrl).origin;
+
+    return (
+      Boolean(bypassSecret) &&
+      normalizeUrl.origin === previewOrigin &&
+      requestOrigin === previewOrigin
+    );
   } catch {
     return false;
   }
@@ -35,7 +46,7 @@ function buildNormalizeHeaders(normalizeUrl: URL, requestUrl: string): Record<st
   };
 
   const bypassSecret = process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
-  if (bypassSecret && shouldIncludePreviewBypass(normalizeUrl, requestUrl)) {
+  if (bypassSecret && shouldIncludePreviewBypass(normalizeUrl, requestUrl, bypassSecret)) {
     headers["x-vercel-protection-bypass"] = bypassSecret;
   }
 
