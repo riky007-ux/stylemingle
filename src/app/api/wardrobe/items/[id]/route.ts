@@ -6,23 +6,34 @@ import { wardrobe_items } from "@/lib/schema";
 import { AUTH_COOKIE_NAME, verifyToken } from "@/lib/auth";
 import { and, eq } from "drizzle-orm";
 
-/**
- * DELETE /api/wardrobe/items/:id
- * Must use the same cookie/JWT auth mechanism as GET/POST /api/wardrobe/items
- */
-export async function DELETE(
-  _request: Request,
-  { params }: { params: { id: string } }
-) {
+function getUserId() {
   const token = cookies().get(AUTH_COOKIE_NAME)?.value;
-  if (!token) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  if (!token) return null;
+  return verifyToken(token);
+}
 
-  const userId = verifyToken(token);
-  if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+export async function PATCH(request: Request, { params }: { params: { id: string } }) {
+  const userId = getUserId();
+  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const body = await request.json();
+  const [updated] = await db
+    .update(wardrobe_items)
+    .set({
+      category: body.category ?? null,
+      primaryColor: body.primaryColor ?? null,
+      styleTag: body.styleTag ?? null,
+    })
+    .where(and(eq(wardrobe_items.id, params.id), eq(wardrobe_items.userId, userId)))
+    .returning();
+
+  if (!updated) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  return NextResponse.json(updated);
+}
+
+export async function DELETE(_request: Request, { params }: { params: { id: string } }) {
+  const userId = getUserId();
+  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const itemId = params.id;
 
@@ -37,9 +48,7 @@ export async function DELETE(
       return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
 
-    await db
-      .delete(wardrobe_items)
-      .where(and(eq(wardrobe_items.id, itemId), eq(wardrobe_items.userId, userId)));
+    await db.delete(wardrobe_items).where(and(eq(wardrobe_items.id, itemId), eq(wardrobe_items.userId, userId)));
 
     return new NextResponse(null, { status: 204 });
   } catch (err) {

@@ -14,16 +14,19 @@ export default function TopNav() {
   };
 
   return (
-    <nav className="flex items-center justify-between px-6 py-4 border-b">
+    <nav className="flex items-center justify-between px-6 py-4 border-b bg-white">
       <div className="text-xl font-bold">
         <Link href="/">StyleMingle</Link>
       </div>
 
-      <div className="flex space-x-4">
+      <div className="flex space-x-4 items-center">
         {isAuthenticated ? (
           <>
             <Link href="/dashboard">Dashboard</Link>
             <Link href="/dashboard/wardrobe">Wardrobe</Link>
+            <Link href="/dashboard/outfits">Outfits</Link>
+            <Link href="/dashboard/avatar">Avatar</Link>
+            <Link href="/dashboard/avatar" className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-slate-900 text-white text-xs">A</Link>
             <button onClick={handleLogout}>Logout</button>
           </>
         ) : (
