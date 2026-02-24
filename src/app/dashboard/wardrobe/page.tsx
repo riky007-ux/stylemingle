@@ -477,8 +477,14 @@ export default function WardrobePage() {
   async function loadItems() {
     try {
       const res = await fetch("/api/wardrobe/items");
-      if (!res.ok) throw new Error("Failed to load wardrobe");
       const data = await res.json();
+      if (!res.ok) {
+        if (data?.code === "DB_MIGRATION_REQUIRED") {
+          setUploadNotice("We’re upgrading your closet. Try again in a moment.");
+          return;
+        }
+        throw new Error("Failed to load wardrobe");
+      }
       setItems(data);
     } catch (err) {
       console.error(err);
@@ -548,7 +554,15 @@ export default function WardrobePage() {
         body: JSON.stringify({ imageUrl: blob.url }),
       });
 
-      if (!res.ok) throw new Error("Failed to save wardrobe item");
+      if (!res.ok) {
+        const payload = await res.json().catch(() => null);
+        if (payload?.code === "DB_MIGRATION_REQUIRED") {
+          setUploadNotice("We’re upgrading your closet. Try again in a moment.");
+          setError(null);
+          return;
+        }
+        throw new Error("Failed to save wardrobe item");
+      }
 
       await loadItems();
     } catch (err) {

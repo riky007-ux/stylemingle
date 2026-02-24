@@ -38,6 +38,11 @@ function pickByCategory(items: OutfitItem[], category: Category) {
   return items.find((i) => i.category === category) ?? null;
 }
 
+function isMissingColumnError(error: unknown) {
+  const msg = String((error as any)?.message || error || "").toLowerCase();
+  return msg.includes("no such column") || msg.includes("has no column named");
+}
+
 function normalizeExplanation(explanation: unknown): string[] {
   if (Array.isArray(explanation)) {
     return explanation.filter((line): line is string => typeof line === "string" && line.trim().length > 0);
@@ -57,11 +62,25 @@ export async function POST(request: Request) {
   const body = await request.json();
   const { occasion, weather, mood } = body;
 
-  const items = (await db
-    .select()
-    .from(wardrobe_items)
-    .where(and(eq(wardrobe_items.userId, userId), inArray(wardrobe_items.category, ["top", "bottom", "shoes", "outerwear"])))
-    .orderBy(desc(wardrobe_items.createdAt))) as OutfitItem[];
+  let items: OutfitItem[] = [];
+  try {
+    items = (await db
+      .select()
+      .from(wardrobe_items)
+      .where(and(eq(wardrobe_items.userId, userId), inArray(wardrobe_items.category, ["top", "bottom", "shoes", "outerwear"])))
+      .orderBy(desc(wardrobe_items.createdAt))) as OutfitItem[];
+  } catch (error) {
+    if (isMissingColumnError(error)) {
+      return NextResponse.json(
+        {
+          error: "We’re upgrading your closet. Try again in a moment.",
+          code: "DB_MIGRATION_REQUIRED",
+        },
+        { status: 503 }
+      );
+    }
+    return NextResponse.json({ error: "Failed to read wardrobe metadata" }, { status: 500 });
+  }
 
   const hasBasics = ["top", "bottom", "shoes"].every((cat) => items.some((i) => i.category === cat));
   if (!hasBasics) {
@@ -121,16 +140,18 @@ export async function POST(request: Request) {
     }
   }
 
-  await db.insert(outfits).values({
-    id: randomUUID(),
-    userId,
-    name: `Outfit for ${occasion || "everyday"}`,
-    description: "AI stylist generated outfit",
-    itemIds: JSON.stringify([result.top?.id, result.bottom?.id, result.shoes?.id, result.outerwear?.id].filter(Boolean)),
-    promptJson: JSON.stringify({ occasion, weather, mood }),
-    explanation: result.explanation.join(" "),
-    createdAt: new Date(),
-  });
+  try {
+    await db.insert(outfits).values({
+      id: randomUUID(),
+      userId,
+      name: `Outfit for ${occasion || "everyday"}`,
+      description: "AI stylist generated outfit",
+      itemIds: JSON.stringify([result.top?.id, result.bottom?.id, result.shoes?.id, result.outerwear?.id].filter(Boolean)),
+      promptJson: JSON.stringify({ occasion, weather, mood }),
+      explanation: result.explanation.join(" "),
+      createdAt: new Date(),
+    });
+  } catch {}
 
   return NextResponse.json(result);
 }
