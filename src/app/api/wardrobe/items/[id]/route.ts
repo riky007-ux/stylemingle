@@ -12,9 +12,9 @@ function getUserId() {
   return verifyToken(token);
 }
 
-function isMissingColumnError(error: unknown) {
+function isSchemaMismatchError(error: unknown) {
   const msg = String((error as any)?.message || error || "").toLowerCase();
-  return msg.includes("no such column") || msg.includes("has no column named");
+  return msg.includes("no such column") || msg.includes("has no column named") || msg.includes("no such table") || msg.includes("sqlite_error");
 }
 
 export async function PATCH(request: Request, { params }: { params: { id: string } }) {
@@ -37,8 +37,24 @@ export async function PATCH(request: Request, { params }: { params: { id: string
     if (!updated) return NextResponse.json({ error: "Not found" }, { status: 404 });
     return NextResponse.json(updated);
   } catch (error) {
-    if (isMissingColumnError(error)) {
-      return NextResponse.json({ error: "Database migration required", code: "DB_MIGRATION_REQUIRED" }, { status: 503 });
+    if (isSchemaMismatchError(error)) {
+      // Older schema used color/style.
+      try {
+        await db.$client.execute({
+          sql: "UPDATE wardrobe_items SET category = ?, color = ?, style = ? WHERE id = ? AND userId = ?",
+          args: [body.category ?? null, body.primaryColor ?? null, body.styleTag ?? null, params.id, userId],
+        });
+
+        return NextResponse.json({
+          id: params.id,
+          userId,
+          category: body.category ?? null,
+          primaryColor: body.primaryColor ?? null,
+          styleTag: body.styleTag ?? null,
+        });
+      } catch {
+        return NextResponse.json({ error: "Database migration required", code: "DB_MIGRATION_REQUIRED" }, { status: 503 });
+      }
     }
     return NextResponse.json({ error: "Failed to save metadata" }, { status: 500 });
   }
@@ -64,7 +80,7 @@ export async function DELETE(_request: Request, { params }: { params: { id: stri
     await db.delete(wardrobe_items).where(and(eq(wardrobe_items.id, itemId), eq(wardrobe_items.userId, userId)));
 
     return new NextResponse(null, { status: 204 });
-  } catch (err) {
+  } catch {
     return NextResponse.json({ error: "Delete failed" }, { status: 500 });
   }
 }

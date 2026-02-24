@@ -7,9 +7,14 @@ import { AUTH_COOKIE_NAME, verifyToken } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { wardrobe_items } from '@/lib/schema';
 
-function isMissingColumnError(error: unknown) {
+function isSchemaMismatchError(error: unknown) {
   const msg = String((error as any)?.message || error || '').toLowerCase();
-  return msg.includes('no such column') || msg.includes('has no column named');
+  return (
+    msg.includes('no such column') ||
+    msg.includes('has no column named') ||
+    msg.includes('no such table') ||
+    msg.includes('sqlite_error')
+  );
 }
 
 function migrationRequiredResponse() {
@@ -17,6 +22,41 @@ function migrationRequiredResponse() {
     { error: 'Database migration required', code: 'DB_MIGRATION_REQUIRED' },
     { status: 503 }
   );
+}
+
+async function selectLegacyRows(userId: string) {
+  try {
+    // Older schema had category/color/style columns.
+    const res = await db.$client.execute({
+      sql: 'SELECT id, userId, imageUrl, createdAt, category, color, style FROM wardrobe_items WHERE userId = ? ORDER BY createdAt DESC',
+      args: [userId],
+    });
+
+    return (res.rows || []).map((row: any) => ({
+      id: row.id,
+      userId: row.userId,
+      imageUrl: row.imageUrl,
+      createdAt: row.createdAt,
+      category: row.category ?? null,
+      primaryColor: row.color ?? null,
+      styleTag: row.style ?? null,
+    }));
+  } catch {
+    const res = await db.$client.execute({
+      sql: 'SELECT id, userId, imageUrl, createdAt FROM wardrobe_items WHERE userId = ? ORDER BY createdAt DESC',
+      args: [userId],
+    });
+
+    return (res.rows || []).map((row: any) => ({
+      id: row.id,
+      userId: row.userId,
+      imageUrl: row.imageUrl,
+      createdAt: row.createdAt,
+      category: null,
+      primaryColor: null,
+      styleTag: null,
+    }));
+  }
 }
 
 /**
@@ -41,21 +81,8 @@ export async function GET() {
 
     return NextResponse.json(items);
   } catch (error) {
-    if (isMissingColumnError(error)) {
-      const legacyItems = await db.$client.execute({
-        sql: 'SELECT id, userId, imageUrl, createdAt FROM wardrobe_items WHERE userId = ? ORDER BY createdAt DESC',
-        args: [userId],
-      });
-
-      const rows = (legacyItems.rows || []).map((row: any) => ({
-        id: row.id,
-        userId: row.userId,
-        imageUrl: row.imageUrl,
-        createdAt: row.createdAt,
-        category: null,
-        primaryColor: null,
-        styleTag: null,
-      }));
+    if (isSchemaMismatchError(error)) {
+      const rows = await selectLegacyRows(userId);
       return NextResponse.json(rows);
     }
 
@@ -105,7 +132,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json(item);
   } catch (error) {
-    if (isMissingColumnError(error)) {
+    if (isSchemaMismatchError(error)) {
       try {
         await db.$client.execute({
           sql: 'INSERT INTO wardrobe_items (id, userId, imageUrl, createdAt) VALUES (?, ?, ?, ?)',

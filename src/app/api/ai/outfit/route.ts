@@ -40,7 +40,7 @@ function pickByCategory(items: OutfitItem[], category: Category) {
 
 function isMissingColumnError(error: unknown) {
   const msg = String((error as any)?.message || error || "").toLowerCase();
-  return msg.includes("no such column") || msg.includes("has no column named");
+  return msg.includes("no such column") || msg.includes("has no column named") || msg.includes("no such table") || msg.includes("sqlite_error");
 }
 
 function normalizeExplanation(explanation: unknown): string[] {
@@ -71,15 +71,30 @@ export async function POST(request: Request) {
       .orderBy(desc(wardrobe_items.createdAt))) as OutfitItem[];
   } catch (error) {
     if (isMissingColumnError(error)) {
-      return NextResponse.json(
-        {
-          error: "We’re upgrading your closet. Try again in a moment.",
-          code: "DB_MIGRATION_REQUIRED",
-        },
-        { status: 503 }
-      );
+      try {
+        const legacy = await db.$client.execute({
+          sql: "SELECT id, imageUrl, category, color, style, createdAt FROM wardrobe_items WHERE userId = ? ORDER BY createdAt DESC",
+          args: [userId],
+        });
+        items = (legacy.rows || []).map((row: any) => ({
+          id: row.id,
+          imageUrl: row.imageUrl,
+          category: row.category ?? null,
+          primaryColor: row.color ?? null,
+          styleTag: row.style ?? null,
+        }));
+      } catch {
+        return NextResponse.json(
+          {
+            error: "We’re upgrading your closet. Try again in a moment.",
+            code: "DB_MIGRATION_REQUIRED",
+          },
+          { status: 503 }
+        );
+      }
+    } else {
+      return NextResponse.json({ error: "Failed to read wardrobe metadata" }, { status: 500 });
     }
-    return NextResponse.json({ error: "Failed to read wardrobe metadata" }, { status: 500 });
   }
 
   const hasBasics = ["top", "bottom", "shoes"].every((cat) => items.some((i) => i.category === cat));
