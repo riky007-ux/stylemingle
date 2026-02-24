@@ -31,6 +31,10 @@ type WardrobeNormalizeTokenClaims = {
   userId: string;
 };
 
+function isUploadDiagnosticsEnabled() {
+  return process.env.SM_UPLOAD_DIAGNOSTICS === "1";
+}
+
 function verifyWardrobeNormalizeToken(token: string) {
   const secret = process.env.NEXTAUTH_SECRET;
   if (!secret) {
@@ -173,7 +177,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const signatureIndicatesHeif = hasHeifSignature(inputBuffer);
     const isHeic = metadataIndicatesHeic || signatureIndicatesHeif;
 
-    if (signatureIndicatesHeif && metadataIndicatesJpeg) {
+    if (signatureIndicatesHeif && metadataIndicatesJpeg && isUploadDiagnosticsEnabled()) {
       console.warn("HEIC signature mismatch: pathname/contentType indicated jpeg", {
         pathname: blob.pathname,
         contentType: blob.contentType,
@@ -193,39 +197,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
       assertIsJpeg(outputJpeg, "normalize outputJpeg");
 
-      const written = await put(blob.pathname, outputJpeg, {
+      await put(blob.pathname, outputJpeg, {
         access: "public",
         addRandomSuffix: false,
         allowOverwrite: true,
         contentType: "image/jpeg",
-      });
-
-      console.log("normalize heic write", {
-        pathname: blob.pathname,
-        inputMagic: jpegMagicHex(inputBuffer),
-        outputMagic: jpegMagicHex(outputJpeg),
-        beforeUrl: blob.url,
-        afterUrl: written.url,
-      });
-
-      if (written.url !== blob.url) {
-        console.warn("normalize heic write url changed", {
-          pathname: blob.pathname,
-          beforeUrl: blob.url,
-          afterUrl: written.url,
-        });
-      }
-
-      const verifyRes = await fetch(written.url, {
-        headers: {
-          Range: "bytes=0-2",
-          "cache-control": "no-cache",
-        },
-      });
-      const verifyBuf = Buffer.from(await verifyRes.arrayBuffer());
-      console.log("normalize post-put verify", {
-        status: verifyRes.status,
-        magic: jpegMagicHex(verifyBuf),
       });
 
       return res.status(200).json({ ok: true, converted: "heic-wasm" });

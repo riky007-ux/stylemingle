@@ -16,13 +16,27 @@ function getFileExtension(pathname: string) {
   return match?.[1] ?? "";
 }
 
-function buildNormalizeHeaders(): Record<string, string> {
+function shouldIncludePreviewBypass(normalizeUrl: URL, requestUrl: string, bypassSecret: string) {
+  if (process.env.VERCEL_ENV !== "preview" || !bypassSecret) {
+    return false;
+  }
+
+  try {
+    const requestOrigin = new URL(requestUrl).origin;
+    return normalizeUrl.origin === requestOrigin;
+  } catch {
+    return false;
+  }
+}
+
+function buildNormalizeHeaders(normalizeUrl: URL, requestUrl: string): Record<string, string> {
   const headers: Record<string, string> = {
     "content-type": "application/json",
   };
-  const bypass = process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
-  if (bypass) {
-    headers["x-vercel-protection-bypass"] = bypass;
+
+  const bypassSecret = process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
+  if (bypassSecret && shouldIncludePreviewBypass(normalizeUrl, requestUrl, bypassSecret)) {
+    headers["x-vercel-protection-bypass"] = bypassSecret;
   }
 
   return headers;
@@ -173,7 +187,7 @@ export function createWardrobeBlobPostHandler(deps: RouteDependencies) {
 
           const normalizeResponse = await fetchImpl(normalizeUrl, {
             method: "POST",
-            headers: buildNormalizeHeaders(),
+            headers: buildNormalizeHeaders(normalizeUrl, request.url),
             body: JSON.stringify({
               eventType: body?.type ?? "blob.upload-completed",
               blob,
@@ -192,6 +206,20 @@ export function createWardrobeBlobPostHandler(deps: RouteDependencies) {
               contentType: responseContentType,
               htmlPreview,
             });
+
+            if (process.env.SM_UPLOAD_DIAGNOSTICS === "1") {
+              const requestOrigin = new URL(request.url).origin;
+              console.warn("Normalization route diagnostics", {
+                status: normalizeResponse.status,
+                requestOrigin,
+                normalizeOrigin: normalizeUrl.origin,
+                usedBypass: shouldIncludePreviewBypass(
+                  normalizeUrl,
+                  request.url,
+                  process.env.VERCEL_AUTOMATION_BYPASS_SECRET ?? "",
+                ),
+              });
+            }
 
             throw new Error(`Normalization route failed: ${normalizeResponse.status}`);
           }
