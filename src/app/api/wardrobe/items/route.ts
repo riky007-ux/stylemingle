@@ -42,7 +42,7 @@ export async function GET() {
     return NextResponse.json(items);
   } catch (error) {
     if (isMissingColumnError(error)) {
-      const legacyItems = await db.execute({
+      const legacyItems = await db.$client.execute({
         sql: 'SELECT id, userId, imageUrl, createdAt FROM wardrobe_items WHERE userId = ? ORDER BY createdAt DESC',
         args: [userId],
       });
@@ -107,7 +107,7 @@ export async function POST(request: Request) {
   } catch (error) {
     if (isMissingColumnError(error)) {
       try {
-        await db.execute({
+        await db.$client.execute({
           sql: 'INSERT INTO wardrobe_items (id, userId, imageUrl, createdAt) VALUES (?, ?, ?, ?)',
           args: [id, userId, imageUrl, createdAt.getTime()],
         });
