@@ -35,6 +35,11 @@ export default function OutfitsPage() {
     return [];
   }, [result]);
 
+  const selectedItems: OutfitItem[] = useMemo(() => {
+    if (!result) return [];
+    return [result.top, result.bottom, result.shoes, result.outerwear].filter((item): item is OutfitItem => Boolean(item));
+  }, [result]);
+
   const generate = async () => {
     setError("");
     const res = await fetch("/api/ai/outfit", {
@@ -95,11 +100,11 @@ export default function OutfitsPage() {
         <div className="mt-6 bg-white border rounded-2xl p-4">
           <h2 className="font-semibold mb-3">Suggested items</h2>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            {[result.top, result.bottom, result.shoes, result.outerwear].filter(Boolean).map((item) => (
-              <div key={item!.id} className="rounded-lg border p-2">
-                <Image src={item!.imageUrl} alt={item!.category || "item"} width={240} height={240} className="w-full aspect-square object-cover rounded" unoptimized />
-                <p className="text-xs mt-1 capitalize">{item!.category}</p>
-                <p className="text-xs text-zinc-500">{item!.primaryColor || "No color"}</p>
+            {selectedItems.map((item) => (
+              <div key={item.id} className="rounded-lg border p-2">
+                <Image src={item.imageUrl} alt={item.category || "item"} width={240} height={240} className="w-full aspect-square object-cover rounded" unoptimized />
+                <p className="text-xs mt-1 capitalize">{item.category}</p>
+                <p className="text-xs text-zinc-500">{item.primaryColor || "No color"}</p>
               </div>
             ))}
           </div>

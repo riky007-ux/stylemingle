@@ -25,6 +25,7 @@ export default function AvatarBuilderPage() {
   const [prefs, setPrefs] = useState<AvatarPreferences>(DEFAULT_AVATAR_PREFERENCES);
   const [saved, setSaved] = useState(false);
   const [latestOutfit, setLatestOutfit] = useState<LatestOutfitPayload | null>(null);
+  const outfitParam = searchParams?.get("outfit") ?? null;
 
   useEffect(() => {
     fetch("/api/avatar/preferences").then(async (res) => {
@@ -36,7 +37,7 @@ export default function AvatarBuilderPage() {
   }, []);
 
   useEffect(() => {
-    if (searchParams.get("outfit") !== "latest") {
+    if (outfitParam !== "latest") {
       setLatestOutfit(null);
       return;
     }
@@ -55,7 +56,7 @@ export default function AvatarBuilderPage() {
     } catch {
       setLatestOutfit(null);
     }
-  }, [searchParams]);
+  }, [outfitParam]);
 
   const save = async () => {
     const res = await fetch("/api/avatar/preferences", {
