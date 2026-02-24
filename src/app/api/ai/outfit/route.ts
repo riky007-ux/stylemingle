@@ -10,14 +10,44 @@ import { outfits, wardrobe_items } from "@/lib/schema";
 
 type Category = "top" | "bottom" | "shoes" | "outerwear";
 
+type OutfitItem = {
+  id: string;
+  imageUrl: string;
+  category: string | null;
+  primaryColor: string | null;
+  styleTag: string | null;
+};
+
+type OutfitResponse = {
+  top: OutfitItem | null;
+  bottom: OutfitItem | null;
+  shoes: OutfitItem | null;
+  outerwear: OutfitItem | null;
+  explanation: string[];
+  followUpQuestion: string;
+  source: "fallback" | "openai";
+};
+
 function getUserId() {
   const token = cookies().get(AUTH_COOKIE_NAME)?.value;
   if (!token) return null;
   return verifyToken(token);
 }
 
-function pickByCategory(items: any[], category: Category) {
-  return items.filter((i) => i.category === category)[0] ?? null;
+function pickByCategory(items: OutfitItem[], category: Category) {
+  return items.find((i) => i.category === category) ?? null;
+}
+
+function normalizeExplanation(explanation: unknown): string[] {
+  if (Array.isArray(explanation)) {
+    return explanation.filter((line): line is string => typeof line === "string" && line.trim().length > 0);
+  }
+
+  if (typeof explanation === "string" && explanation.trim().length > 0) {
+    return [explanation.trim()];
+  }
+
+  return [];
 }
 
 export async function POST(request: Request) {
@@ -27,18 +57,18 @@ export async function POST(request: Request) {
   const body = await request.json();
   const { occasion, weather, mood } = body;
 
-  const items = await db
+  const items = (await db
     .select()
     .from(wardrobe_items)
-    .where(and(eq(wardrobe_items.userId, userId), inArray(wardrobe_items.category, ["top", "bottom", "shoes", "outerwear"])) )
-    .orderBy(desc(wardrobe_items.createdAt));
+    .where(and(eq(wardrobe_items.userId, userId), inArray(wardrobe_items.category, ["top", "bottom", "shoes", "outerwear"])))
+    .orderBy(desc(wardrobe_items.createdAt))) as OutfitItem[];
 
   const hasBasics = ["top", "bottom", "shoes"].every((cat) => items.some((i) => i.category === cat));
   if (!hasBasics) {
     return NextResponse.json({ error: "Please tag at least one top, bottom, and shoes item before generating." }, { status: 400 });
   }
 
-  const fallback = {
+  const fallback: OutfitResponse = {
     top: pickByCategory(items, "top"),
     bottom: pickByCategory(items, "bottom"),
     shoes: pickByCategory(items, "shoes"),
@@ -51,7 +81,7 @@ export async function POST(request: Request) {
     source: "fallback",
   };
 
-  let result = fallback;
+  let result: OutfitResponse = fallback;
 
   if (process.env.OPENAI_API_KEY) {
     const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -63,7 +93,11 @@ export async function POST(request: Request) {
         temperature: 0.4,
         response_format: { type: "json_object" },
         messages: [
-          { role: "system", content: "You are a safe stylist assistant. Return JSON only with keys: topId,bottomId,shoesId,outerwearId(optional),explanation(array of short bullets),followUpQuestion." },
+          {
+            role: "system",
+            content:
+              "You are a safe stylist assistant. Return JSON only with keys: topId,bottomId,shoesId,outerwearId(optional),explanation(array of short bullets),followUpQuestion.",
+          },
           { role: "user", content: JSON.stringify({ occasion, weather, mood, items: compactItems }) },
         ],
       });
@@ -75,8 +109,11 @@ export async function POST(request: Request) {
         bottom: byId[parsed.bottomId] ?? fallback.bottom,
         shoes: byId[parsed.shoesId] ?? fallback.shoes,
         outerwear: byId[parsed.outerwearId] ?? fallback.outerwear,
-        explanation: parsed.explanation ?? fallback.explanation,
-        followUpQuestion: parsed.followUpQuestion ?? fallback.followUpQuestion,
+        explanation: normalizeExplanation(parsed.explanation),
+        followUpQuestion:
+          typeof parsed.followUpQuestion === "string" && parsed.followUpQuestion.trim().length > 0
+            ? parsed.followUpQuestion
+            : fallback.followUpQuestion,
         source: "openai",
       };
     } catch {
@@ -91,7 +128,7 @@ export async function POST(request: Request) {
     description: "AI stylist generated outfit",
     itemIds: JSON.stringify([result.top?.id, result.bottom?.id, result.shoes?.id, result.outerwear?.id].filter(Boolean)),
     promptJson: JSON.stringify({ occasion, weather, mood }),
-    explanation: Array.isArray(result.explanation) ? result.explanation.join(" ") : String(result.explanation),
+    explanation: result.explanation.join(" "),
     createdAt: new Date(),
   });
 

@@ -1,9 +1,9 @@
 import type { RegistryOption } from "../types";
 
 export const faceStyles: RegistryOption[] = [
-  { key: "face-soft", label: "Soft" },
-  { key: "face-angular", label: "Angular" },
-  { key: "face-balanced", label: "Balanced" },
+  { key: "face-soft", label: "Face 1" },
+  { key: "face-angular", label: "Face 2" },
+  { key: "face-balanced", label: "Face 3" },
 ];
 
 export function FaceShape({ styleKey, shade }: { styleKey: string; shade: string }) {
