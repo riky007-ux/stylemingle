@@ -20,6 +20,13 @@ type OutfitResult = {
   followUpQuestion?: string;
 };
 
+type WardrobeItem = {
+  id: string;
+  category?: string | null;
+  primaryColor?: string | null;
+  styleTag?: string | null;
+};
+
 export default function OutfitsPage() {
   const router = useRouter();
   const [occasion, setOccasion] = useState("casual");
@@ -27,6 +34,8 @@ export default function OutfitsPage() {
   const [mood, setMood] = useState("minimalist");
   const [result, setResult] = useState<OutfitResult | null>(null);
   const [error, setError] = useState("");
+  const [preflightStatus, setPreflightStatus] = useState("");
+  const [loading, setLoading] = useState(false);
 
   const explanationLines = useMemo(() => {
     if (!result) return [];
@@ -40,39 +49,102 @@ export default function OutfitsPage() {
     return [result.top, result.bottom, result.shoes, result.outerwear].filter((item): item is OutfitItem => Boolean(item));
   }, [result]);
 
-  const generate = async () => {
-    setError("");
-    const res = await fetch("/api/ai/outfit", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ occasion, weather, mood }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      setError(data.error || "Failed to generate");
-      return;
+  const countBasics = (items: WardrobeItem[]) => {
+    const hasTop = items.some((item) => item.category === "top");
+    const hasBottom = items.some((item) => item.category === "bottom");
+    const hasShoes = items.some((item) => item.category === "shoes");
+    return { hasTop, hasBottom, hasShoes, enough: hasTop && hasBottom && hasShoes };
+  };
+
+  const ensureTaggedBasics = async () => {
+    const itemsRes = await fetch("/api/wardrobe/items");
+    const items = (await itemsRes.json()) as WardrobeItem[];
+    if (!itemsRes.ok || !Array.isArray(items)) {
+      throw new Error("Failed to load wardrobe");
     }
 
-    const payload = {
-      createdAt: Date.now(),
-      occasion,
-      weather,
-      mood,
-      items: {
-        top: data.top,
-        bottom: data.bottom,
-        shoes: data.shoes,
-        outerwear: data.outerwear,
-      },
-      explanation: Array.isArray(data.explanation)
-        ? data.explanation
-        : typeof data.explanation === "string"
-          ? [data.explanation]
-          : [],
-    };
+    const starting = countBasics(items);
+    if (starting.enough) return;
 
-    localStorage.setItem("sm:latestOutfit", JSON.stringify(payload));
-    setResult(data);
+    const missingMeta = items.filter((item) => !item.category || !item.primaryColor || !item.styleTag);
+    if (missingMeta.length === 0) return;
+
+    setPreflightStatus(`Auto-tagging your closet… (0/${missingMeta.length})`);
+    const idBatches: string[][] = [];
+    for (let i = 0; i < missingMeta.length; i += 6) {
+      idBatches.push(missingMeta.slice(i, i + 6).map((item) => item.id));
+    }
+
+    let processed = 0;
+    for (const batch of idBatches) {
+      // eslint-disable-next-line no-await-in-loop
+      const res = await fetch("/api/ai/wardrobe/tag-batch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ itemIds: batch }),
+      });
+
+      const payload = await res.json().catch(() => null);
+      processed += batch.length;
+      setPreflightStatus(`Auto-tagging your closet… (${Math.min(processed, missingMeta.length)}/${missingMeta.length})`);
+
+      if (!res.ok) {
+        if (payload?.error === "AI_UNAVAILABLE") {
+          setPreflightStatus("");
+          setError("Auto-tagging unavailable right now. You can still add details in Wardrobe.");
+          return;
+        }
+        throw new Error("Auto-tagging failed");
+      }
+    }
+
+    setPreflightStatus("");
+  };
+
+  const generate = async () => {
+    setError("");
+    setLoading(true);
+    setPreflightStatus("");
+    try {
+      await ensureTaggedBasics();
+      const res = await fetch("/api/ai/outfit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ occasion, weather, mood }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "Failed to generate");
+        return;
+      }
+
+      const payload = {
+        createdAt: Date.now(),
+        occasion,
+        weather,
+        mood,
+        items: {
+          top: data.top,
+          bottom: data.bottom,
+          shoes: data.shoes,
+          outerwear: data.outerwear,
+        },
+        explanation: Array.isArray(data.explanation)
+          ? data.explanation
+          : typeof data.explanation === "string"
+            ? [data.explanation]
+            : [],
+      };
+
+      localStorage.setItem("sm:latestOutfit", JSON.stringify(payload));
+      setResult(data);
+    } catch (err) {
+      console.error(err);
+      setError("Failed to generate");
+    } finally {
+      setLoading(false);
+      setPreflightStatus("");
+    }
   };
 
   return (
@@ -91,9 +163,10 @@ export default function OutfitsPage() {
           ))}
         </select>
       </div>
-      <button onClick={generate} className="rounded-xl bg-slate-900 text-white px-4 py-2">
-        Generate outfit
+      <button onClick={generate} disabled={loading} className="rounded-xl bg-slate-900 text-white px-4 py-2 disabled:opacity-60">
+        {loading ? "Generating…" : "Generate outfit"}
       </button>
+      {preflightStatus && <p className="mt-3 text-sm text-zinc-600">{preflightStatus}</p>}
       {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
 
       {result && (
