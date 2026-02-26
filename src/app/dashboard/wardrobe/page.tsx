@@ -10,6 +10,9 @@ type WardrobeItem = {
   id: string;
   imageUrl: string;
   createdAt?: string;
+  category?: "top" | "bottom" | "shoes" | "outerwear" | "accessory" | null;
+  primaryColor?: string | null;
+  styleTag?: string | null;
 };
 
 /**
@@ -383,11 +386,17 @@ function ResilientImage({
 function WardrobeItemCard({
   item,
   onDelete,
+  onSaveDetails,
 }: {
   item: WardrobeItem;
   onDelete: (id: string) => Promise<void>;
+  onSaveDetails: (id: string, updates: Partial<WardrobeItem>) => Promise<void>;
 }) {
   const [deleting, setDeleting] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [category, setCategory] = useState(item.category || "");
+  const [primaryColor, setPrimaryColor] = useState(item.primaryColor || "");
+  const [styleTag, setStyleTag] = useState(item.styleTag || "");
 
   const label = buildItemLabel(item);
   const thumbnailUrl = buildThumbnailUrl(item.imageUrl);
@@ -426,6 +435,33 @@ function WardrobeItemCard({
       <div className="pointer-events-none absolute bottom-0 left-0 right-0 bg-black/40 px-2 py-1">
         <div className="truncate text-xs text-white">{label}</div>
       </div>
+
+      <button
+        type="button"
+        className="absolute left-2 top-2 rounded bg-white/90 px-2 py-1 text-xs font-medium text-zinc-800"
+        onClick={() => setEditing((v) => !v)}
+      >
+        {item.category ? "Edit" : "Add details"}
+      </button>
+
+      {editing && (
+        <div className="absolute inset-0 bg-white/95 p-2 text-xs">
+          <select className="w-full border rounded p-1 mb-1" value={category} onChange={(e) => setCategory(e.target.value)}>
+            <option value="">Category</option>
+            <option value="top">Top</option>
+            <option value="bottom">Bottom</option>
+            <option value="shoes">Shoes</option>
+            <option value="outerwear">Outerwear</option>
+            <option value="accessory">Accessory</option>
+          </select>
+          <input className="w-full border rounded p-1 mb-1" placeholder="Primary color" value={primaryColor} onChange={(e) => setPrimaryColor(e.target.value)} />
+          <input className="w-full border rounded p-1 mb-2" placeholder="Style tag (optional)" value={styleTag} onChange={(e) => setStyleTag(e.target.value)} />
+          <button className="w-full rounded bg-slate-900 text-white py-1" onClick={async () => {
+            await onSaveDetails(item.id, { category: (category as any) || null, primaryColor: primaryColor || null, styleTag: styleTag || null });
+            setEditing(false);
+          }}>Save details</button>
+        </div>
+      )}
     </div>
   );
 }
@@ -441,8 +477,14 @@ export default function WardrobePage() {
   async function loadItems() {
     try {
       const res = await fetch("/api/wardrobe/items");
-      if (!res.ok) throw new Error("Failed to load wardrobe");
       const data = await res.json();
+      if (!res.ok) {
+        if (data?.code === "DB_MIGRATION_REQUIRED") {
+          setUploadNotice("We’re upgrading your closet. Try again in a moment.");
+          return;
+        }
+        throw new Error("Failed to load wardrobe");
+      }
       setItems(data);
     } catch (err) {
       console.error(err);
@@ -476,6 +518,18 @@ export default function WardrobePage() {
     }
   };
 
+  const handleSaveDetails = async (id: string, updates: Partial<WardrobeItem>) => {
+    const res = await fetch(`/api/wardrobe/items/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(updates),
+    });
+    if (res.ok) {
+      const updated = await res.json();
+      setItems((prev) => prev.map((item) => (item.id === id ? { ...item, ...updated } : item)));
+    }
+  };
+
   async function handleUpload(file: File) {
     setError(null);
     setUploadNotice(null);
@@ -500,7 +554,15 @@ export default function WardrobePage() {
         body: JSON.stringify({ imageUrl: blob.url }),
       });
 
-      if (!res.ok) throw new Error("Failed to save wardrobe item");
+      if (!res.ok) {
+        const payload = await res.json().catch(() => null);
+        if (payload?.code === "DB_MIGRATION_REQUIRED") {
+          setUploadNotice("We’re upgrading your closet. Try again in a moment.");
+          setError(null);
+          return;
+        }
+        throw new Error("Failed to save wardrobe item");
+      }
 
       await loadItems();
     } catch (err) {
@@ -555,7 +617,7 @@ export default function WardrobePage() {
 
       <div className="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
         {items.map((item) => (
-          <WardrobeItemCard key={item.id} item={item} onDelete={handleDelete} />
+          <WardrobeItemCard key={item.id} item={item} onDelete={handleDelete} onSaveDetails={handleSaveDetails} />
         ))}
       </div>
     </div>

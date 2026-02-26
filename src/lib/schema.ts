@@ -16,7 +16,6 @@ export const users = sqliteTable("users", {
 
 /**
  * Wardrobe Items
- * ⚠️ MUST match Turso table exactly
  */
 export const wardrobe_items = sqliteTable("wardrobe_items", {
   id: text("id").primaryKey(),
@@ -24,7 +23,25 @@ export const wardrobe_items = sqliteTable("wardrobe_items", {
     .notNull()
     .references(() => users.id),
   imageUrl: text("imageUrl").notNull(),
+  category: text("category"),
+  primaryColor: text("primaryColor"),
+  styleTag: text("styleTag"),
   createdAt: integer("createdAt", { mode: "timestamp" }).notNull(),
+});
+
+export const avatar_preferences = sqliteTable("avatar_preferences", {
+  id: text("id").primaryKey(),
+  userId: text("userId")
+    .notNull()
+    .references(() => users.id)
+    .unique(),
+  gender: text("gender", { enum: ["male", "female"] }).notNull(),
+  skinToneKey: text("skinToneKey").notNull(),
+  hairStyleKey: text("hairStyleKey").notNull(),
+  hairColorKey: text("hairColorKey").notNull(),
+  faceStyleKey: text("faceStyleKey").notNull(),
+  bodySize: text("bodySize", { enum: ["S", "M", "L", "XL"] }).notNull(),
+  updatedAt: integer("updatedAt", { mode: "timestamp" }).notNull(),
 });
 
 /**
@@ -38,6 +55,8 @@ export const outfits = sqliteTable("outfits", {
   name: text("name").notNull(),
   description: text("description").notNull(),
   itemIds: text("itemIds").notNull(),
+  promptJson: text("promptJson"),
+  explanation: text("explanation"),
   createdAt: integer("createdAt", { mode: "timestamp" }).notNull(),
 });
 
@@ -59,6 +78,7 @@ export const ratings = sqliteTable("ratings", {
 export default {
   users,
   wardrobe_items,
+  avatar_preferences,
   outfits,
   ratings,
 };

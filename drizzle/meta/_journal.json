@@ -8,6 +8,20 @@
       "when": 1768196797025,
       "tag": "0000_new_nekra",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1768197800000,
+      "tag": "0001_add_wardrobe_metadata",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1768198800000,
+      "tag": "0002_gate_10_2_avatar_and_stylist",
+      "breakpoints": true
     }
   ]
 }
