@@ -9,6 +9,16 @@ import { runVisionTagging, type VisionTaggingResult } from "../tagging";
 
 const MAX_BATCH = 6;
 
+type UpdatedRow = {
+  id: string;
+  userId: string;
+  createdAt: Date;
+  imageUrl: string;
+  category: string | null;
+  primaryColor: string | null;
+  styleTag: string | null;
+};
+
 function getUserId() {
   const token = cookies().get(AUTH_COOKIE_NAME)?.value;
   if (!token) return null;
@@ -94,7 +104,7 @@ export async function POST(request: Request) {
       tagById.set(tag.itemId, tag);
     }
 
-    const updated = [];
+    const updated: UpdatedRow[] = [];
 
     for (const item of candidates) {
       const tagging = tagById.get(item.id);
