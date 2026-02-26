@@ -10,7 +10,7 @@ type WardrobeItem = {
   id: string;
   imageUrl: string;
   createdAt?: string;
-  category?: "top" | "bottom" | "shoes" | "outerwear" | "accessory" | null;
+  category?: "top" | "bottom" | "shoes" | "outerwear" | "accessory" | "other" | "unknown" | null;
   primaryColor?: string | null;
   styleTag?: string | null;
 };
@@ -387,10 +387,14 @@ function WardrobeItemCard({
   item,
   onDelete,
   onSaveDetails,
+  onRetag,
+  isTagging,
 }: {
   item: WardrobeItem;
   onDelete: (id: string) => Promise<void>;
   onSaveDetails: (id: string, updates: Partial<WardrobeItem>) => Promise<void>;
+  onRetag: (id: string) => Promise<void>;
+  isTagging: boolean;
 }) {
   const [deleting, setDeleting] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -444,6 +448,25 @@ function WardrobeItemCard({
         {item.category ? "Edit" : "Add details"}
       </button>
 
+      {isTagging && (
+        <div className="absolute left-2 top-10 rounded bg-black/70 px-2 py-1 text-[11px] text-white">Analyzing…</div>
+      )}
+
+      <div className="absolute right-2 bottom-10 rounded bg-white/85 px-2 py-1 text-[11px] text-zinc-800">
+        <div className="capitalize">{item.category || "unknown"}</div>
+        <div className="capitalize">{item.primaryColor || "unknown"}</div>
+        <div className="capitalize">{item.styleTag || "unknown"}</div>
+      </div>
+
+      <button
+        type="button"
+        className="absolute right-2 bottom-2 rounded bg-white/90 px-2 py-1 text-[11px] font-medium text-zinc-700"
+        onClick={() => onRetag(item.id)}
+        disabled={isTagging}
+      >
+        Re-tag
+      </button>
+
       {editing && (
         <div className="absolute inset-0 bg-white/95 p-2 text-xs">
           <select className="w-full border rounded p-1 mb-1" value={category} onChange={(e) => setCategory(e.target.value)}>
@@ -473,6 +496,9 @@ export default function WardrobePage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [uploadNotice, setUploadNotice] = useState<string | null>(null);
+  const [taggingItemIds, setTaggingItemIds] = useState<string[]>([]);
+  const [bulkTagging, setBulkTagging] = useState(false);
+  const [bulkTagProgress, setBulkTagProgress] = useState<string | null>(null);
 
   async function loadItems() {
     try {
@@ -530,6 +556,109 @@ export default function WardrobePage() {
     }
   };
 
+  const runAutoTag = async (itemId: string, force = false) => {
+    setTaggingItemIds((prev) => (prev.includes(itemId) ? prev : [...prev, itemId]));
+    try {
+      const res = await fetch("/api/ai/wardrobe/tag", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ itemId, force }),
+      });
+
+      const payload = await res.json().catch(() => null);
+      if (!res.ok) {
+        if (payload?.error === "AI_UNAVAILABLE") {
+          setUploadNotice("Auto-tagging unavailable right now. You can still add details manually.");
+          return;
+        }
+        throw new Error("Auto-tagging failed");
+      }
+
+      setItems((prev) => prev.map((item) => (item.id === itemId ? { ...item, ...payload } : item)));
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setTaggingItemIds((prev) => prev.filter((id) => id !== itemId));
+    }
+  };
+
+  const handleAutoTagCloset = async () => {
+    setBulkTagging(true);
+    setBulkTagProgress(null);
+    setError(null);
+    setUploadNotice(null);
+
+    const BATCH_SIZE = 6;
+
+    try {
+      const idsToTag = items
+        .filter((item) => !item.category || !item.primaryColor || !item.styleTag)
+        .map((item) => item.id);
+
+      if (idsToTag.length === 0) {
+        setBulkTagProgress("Everything is already tagged.");
+        return;
+      }
+
+      setTaggingItemIds((prev) => Array.from(new Set([...prev, ...idsToTag])));
+
+      let processed = 0;
+
+      for (let start = 0; start < idsToTag.length; start += BATCH_SIZE) {
+        const chunk = idsToTag.slice(start, start + BATCH_SIZE);
+        setBulkTagProgress(`Auto-tagging ${Math.min(processed + chunk.length, idsToTag.length)}/${idsToTag.length}…`);
+
+        // sequential chunks to avoid burst/rate-limit issues
+        // eslint-disable-next-line no-await-in-loop
+        const res = await fetch("/api/ai/wardrobe/tag-batch", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ itemIds: chunk }),
+        });
+
+        // eslint-disable-next-line no-await-in-loop
+        const payload = await res.json().catch(() => null);
+
+        if (!res.ok) {
+          const code = payload?.code;
+          const errorCode = payload?.error;
+
+          if (res.status === 503 && (errorCode === "AI_UNAVAILABLE" || code === "AI_UNAVAILABLE")) {
+            setUploadNotice("Auto-tagging unavailable right now. You can still add details manually.");
+            return;
+          }
+
+          if (res.status === 503 && code === "DB_MIGRATION_REQUIRED") {
+            setUploadNotice("We’re upgrading your closet. Try again in a moment.");
+            return;
+          }
+
+          throw new Error("Bulk auto-tagging failed");
+        }
+
+        const updatedRows = Array.isArray(payload?.updated) ? payload.updated : [];
+        if (updatedRows.length > 0) {
+          const updatedById = new Map(updatedRows.map((row: WardrobeItem) => [row.id, row]));
+          setItems((prev) => prev.map((item) => {
+            const updated = updatedById.get(item.id);
+            return updated ? { ...item, ...updated } : item;
+          }));
+        }
+
+        processed += chunk.length;
+        setTaggingItemIds((prev) => prev.filter((id) => !chunk.includes(id)));
+      }
+
+      setBulkTagProgress(`Auto-tagging ${idsToTag.length}/${idsToTag.length}…`);
+    } catch (err) {
+      console.error(err);
+      setError("Auto-tagging failed");
+    } finally {
+      setBulkTagging(false);
+      setTaggingItemIds([]);
+    }
+  };
+
   async function handleUpload(file: File) {
     setError(null);
     setUploadNotice(null);
@@ -564,7 +693,9 @@ export default function WardrobePage() {
         throw new Error("Failed to save wardrobe item");
       }
 
-      await loadItems();
+      const created = await res.json();
+      setItems((prev) => [created, ...prev]);
+      void runAutoTag(created.id);
     } catch (err) {
       console.error(err);
       setUploadNotice(
@@ -605,8 +736,21 @@ export default function WardrobePage() {
         }}
       />
 
+      <button
+        type="button"
+        onClick={handleAutoTagCloset}
+        disabled={bulkTagging || items.length === 0}
+        className="ml-3 rounded border border-zinc-300 px-3 py-1 text-sm disabled:opacity-50"
+      >
+        {bulkTagging ? (bulkTagProgress || "Auto-tagging…") : "Auto-tag my closet"}
+      </button>
+
       {uploadNotice && (
         <div className="mt-2 text-sm text-zinc-600">{uploadNotice}</div>
+      )}
+
+      {bulkTagProgress && bulkTagging && (
+        <div className="mt-2 text-sm text-zinc-600">{bulkTagProgress}</div>
       )}
 
       {error && <div className="mt-2 text-sm text-red-600">{error}</div>}
@@ -617,7 +761,14 @@ export default function WardrobePage() {
 
       <div className="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
         {items.map((item) => (
-          <WardrobeItemCard key={item.id} item={item} onDelete={handleDelete} onSaveDetails={handleSaveDetails} />
+          <WardrobeItemCard
+            key={item.id}
+            item={item}
+            onDelete={handleDelete}
+            onSaveDetails={handleSaveDetails}
+            onRetag={(id) => runAutoTag(id, true)}
+            isTagging={taggingItemIds.includes(item.id)}
+          />
         ))}
       </div>
     </div>

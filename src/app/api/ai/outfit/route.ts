@@ -99,7 +99,14 @@ export async function POST(request: Request) {
 
   const hasBasics = ["top", "bottom", "shoes"].every((cat) => items.some((i) => i.category === cat));
   if (!hasBasics) {
-    return NextResponse.json({ error: "Please tag at least one top, bottom, and shoes item before generating." }, { status: 400 });
+    return NextResponse.json(
+      {
+        error: "We still need a few tagged basics. Try auto-tagging your closet and generate again.",
+        code: "INSUFFICIENT_WARDROBE_METADATA",
+        explanation: ["Add or auto-tag at least one top, one bottom, and one pair of shoes."],
+      },
+      { status: 400 }
+    );
   }
 
   const fallback: OutfitResponse = {
