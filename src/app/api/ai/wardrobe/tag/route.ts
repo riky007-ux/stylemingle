@@ -13,6 +13,27 @@ function getUserId() {
   return verifyToken(token);
 }
 
+function isSchemaMismatchError(error: unknown) {
+  const msg = String((error as any)?.message || error || "").toLowerCase();
+  return (
+    msg.includes("no such column") ||
+    msg.includes("sqlite_error") ||
+    msg.includes("wardrobe_items.primarycolor") ||
+    msg.includes("wardrobe_items.styletag") ||
+    msg.includes("wardrobe_items.category")
+  );
+}
+
+function migrationRequiredResponse() {
+  return NextResponse.json(
+    {
+      error: "We’re upgrading your closet. Try again in a moment.",
+      code: "DB_MIGRATION_REQUIRED",
+    },
+    { status: 503 }
+  );
+}
+
 export async function POST(request: Request) {
   const userId = getUserId();
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -32,11 +53,20 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Missing itemId" }, { status: 400 });
   }
 
-  const [item] = await db
-    .select()
-    .from(wardrobe_items)
-    .where(and(eq(wardrobe_items.id, body.itemId), eq(wardrobe_items.userId, userId)))
-    .limit(1);
+  let item;
+  try {
+    const [selected] = await db
+      .select()
+      .from(wardrobe_items)
+      .where(and(eq(wardrobe_items.id, body.itemId), eq(wardrobe_items.userId, userId)))
+      .limit(1);
+    item = selected;
+  } catch (error) {
+    if (isSchemaMismatchError(error)) {
+      return migrationRequiredResponse();
+    }
+    return NextResponse.json({ error: "Failed to load wardrobe item" }, { status: 500 });
+  }
 
   if (!item) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -66,6 +96,9 @@ export async function POST(request: Request) {
 
     return NextResponse.json(updated || item);
   } catch (error) {
+    if (isSchemaMismatchError(error)) {
+      return migrationRequiredResponse();
+    }
     console.error("tagging_failed", error);
     return NextResponse.json({ error: "Tagging failed" }, { status: 500 });
   }

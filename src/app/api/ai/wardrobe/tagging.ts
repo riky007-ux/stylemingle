@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { z } from "zod";
 
 export const CATEGORY_VALUES = ["top", "bottom", "shoes", "outerwear", "accessory", "other", "unknown"] as const;
 export const COLOR_VALUES = [
@@ -32,20 +33,27 @@ export const STYLE_VALUES = [
   "unknown",
 ] as const;
 
-export type TaggingResult = {
-  itemId: string;
-  category: (typeof CATEGORY_VALUES)[number];
-  primaryColor: (typeof COLOR_VALUES)[number];
-  styleTag: (typeof STYLE_VALUES)[number];
-};
+export const VisionTaggingResultSchema = z.object({
+  itemId: z.string().min(1),
+  category: z.enum(CATEGORY_VALUES),
+  primaryColor: z.enum(COLOR_VALUES),
+  styleTag: z.enum(STYLE_VALUES),
+});
+
+export type VisionTaggingResult = z.infer<typeof VisionTaggingResultSchema>;
+
+const VisionTaggingPayloadSchema = z.object({
+  items: z.array(
+    z.object({
+      itemId: z.string().min(1),
+      category: z.enum(CATEGORY_VALUES).optional(),
+      primaryColor: z.enum(COLOR_VALUES).optional(),
+      styleTag: z.enum(STYLE_VALUES).optional(),
+    })
+  ),
+});
 
 const DEFAULT_VISION_MODEL = process.env.OPENAI_VISION_MODEL || "gpt-4o-mini";
-
-function normalizeEnum<T extends readonly string[]>(value: unknown, allowed: T, fallback: T[number]): T[number] {
-  if (typeof value !== "string") return fallback;
-  const normalized = value.trim().toLowerCase();
-  return (allowed as readonly string[]).includes(normalized) ? (normalized as T[number]) : fallback;
-}
 
 function extractJsonObject(content: string) {
   const trimmed = content.trim();
@@ -60,16 +68,7 @@ function extractJsonObject(content: string) {
   return "{}";
 }
 
-function normalizeTaggingResult(raw: any): TaggingResult {
-  return {
-    itemId: String(raw?.itemId || ""),
-    category: normalizeEnum(raw?.category, CATEGORY_VALUES, "unknown"),
-    primaryColor: normalizeEnum(raw?.primaryColor, COLOR_VALUES, "unknown"),
-    styleTag: normalizeEnum(raw?.styleTag, STYLE_VALUES, "unknown"),
-  };
-}
-
-export async function runVisionTagging(inputs: Array<{ itemId: string; imageUrl: string }>) {
+export async function runVisionTagging(inputs: Array<{ itemId: string; imageUrl: string }>): Promise<VisionTaggingResult[]> {
   const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
   const schema = {
@@ -130,18 +129,36 @@ export async function runVisionTagging(inputs: Array<{ itemId: string; imageUrl:
   });
 
   const raw = extractJsonObject(completion.choices[0]?.message?.content || "{}");
-  const parsed = JSON.parse(raw);
-  const taggedItems = Array.isArray(parsed?.items) ? parsed.items.map(normalizeTaggingResult) : [];
+  const parsed = VisionTaggingPayloadSchema.safeParse(JSON.parse(raw));
+  if (!parsed.success) {
+    throw new Error("Invalid tagging payload");
+  }
 
-  const byId = new Map(taggedItems.map((item) => [item.itemId, item]));
+  const parsedById = new Map<
+    string,
+    {
+      category?: VisionTaggingResult["category"];
+      primaryColor?: VisionTaggingResult["primaryColor"];
+      styleTag?: VisionTaggingResult["styleTag"];
+    }
+  >();
+
+  for (const item of parsed.data.items) {
+    parsedById.set(item.itemId, {
+      category: item.category,
+      primaryColor: item.primaryColor,
+      styleTag: item.styleTag,
+    });
+  }
+
   return inputs.map((input) => {
-    const hit = byId.get(input.itemId);
-    if (hit) return hit;
-    return {
+    const match = parsedById.get(input.itemId);
+
+    return VisionTaggingResultSchema.parse({
       itemId: input.itemId,
-      category: "unknown",
-      primaryColor: "unknown",
-      styleTag: "unknown",
-    } satisfies TaggingResult;
+      category: match?.category ?? "unknown",
+      primaryColor: match?.primaryColor ?? "unknown",
+      styleTag: match?.styleTag ?? "unknown",
+    });
   });
 }

@@ -5,7 +5,7 @@ import { cookies } from "next/headers";
 import { AUTH_COOKIE_NAME, verifyToken } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { wardrobe_items } from "@/lib/schema";
-import { runVisionTagging } from "../tagging";
+import { runVisionTagging, type VisionTaggingResult } from "../tagging";
 
 const MAX_BATCH = 6;
 
@@ -13,6 +13,27 @@ function getUserId() {
   const token = cookies().get(AUTH_COOKIE_NAME)?.value;
   if (!token) return null;
   return verifyToken(token);
+}
+
+function isSchemaMismatchError(error: unknown) {
+  const msg = String((error as any)?.message || error || "").toLowerCase();
+  return (
+    msg.includes("no such column") ||
+    msg.includes("sqlite_error") ||
+    msg.includes("wardrobe_items.primarycolor") ||
+    msg.includes("wardrobe_items.styletag") ||
+    msg.includes("wardrobe_items.category")
+  );
+}
+
+function migrationRequiredResponse() {
+  return NextResponse.json(
+    {
+      error: "We’re upgrading your closet. Try again in a moment.",
+      code: "DB_MIGRATION_REQUIRED",
+    },
+    { status: 503 }
+  );
 }
 
 export async function POST(request: Request) {
@@ -35,11 +56,19 @@ export async function POST(request: Request) {
     return NextResponse.json({ updated: [], skipped: [] });
   }
 
-  const ownedItems = await db
-    .select()
-    .from(wardrobe_items)
-    .where(and(eq(wardrobe_items.userId, userId), inArray(wardrobe_items.id, incomingIds)))
-    .orderBy(desc(wardrobe_items.createdAt));
+  let ownedItems;
+  try {
+    ownedItems = await db
+      .select()
+      .from(wardrobe_items)
+      .where(and(eq(wardrobe_items.userId, userId), inArray(wardrobe_items.id, incomingIds)))
+      .orderBy(desc(wardrobe_items.createdAt));
+  } catch (error) {
+    if (isSchemaMismatchError(error)) {
+      return migrationRequiredResponse();
+    }
+    return NextResponse.json({ error: "Failed to load wardrobe items" }, { status: 500 });
+  }
 
   const skipped: string[] = [];
   const candidates = ownedItems
@@ -58,9 +87,13 @@ export async function POST(request: Request) {
   }
 
   try {
-    const taggings = await runVisionTagging(candidates.map((item) => ({ itemId: item.id, imageUrl: item.imageUrl })));
+    const taggings: VisionTaggingResult[] = await runVisionTagging(candidates.map((item) => ({ itemId: item.id, imageUrl: item.imageUrl })));
 
-    const tagById = new Map(taggings.map((tag) => [tag.itemId, tag]));
+    const tagById = new Map<string, VisionTaggingResult>();
+    for (const tag of taggings) {
+      tagById.set(tag.itemId, tag);
+    }
+
     const updated = [];
 
     for (const item of candidates) {
@@ -82,6 +115,9 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ updated, skipped });
   } catch (error) {
+    if (isSchemaMismatchError(error)) {
+      return migrationRequiredResponse();
+    }
     console.error("tag_batch_failed", error);
     return NextResponse.json({ error: "Tagging failed" }, { status: 500 });
   }
