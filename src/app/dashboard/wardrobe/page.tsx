@@ -498,6 +498,7 @@ export default function WardrobePage() {
   const [uploadNotice, setUploadNotice] = useState<string | null>(null);
   const [taggingItemIds, setTaggingItemIds] = useState<string[]>([]);
   const [bulkTagging, setBulkTagging] = useState(false);
+  const [bulkTagProgress, setBulkTagProgress] = useState<string | null>(null);
 
   async function loadItems() {
     try {
@@ -583,19 +584,78 @@ export default function WardrobePage() {
 
   const handleAutoTagCloset = async () => {
     setBulkTagging(true);
+    setBulkTagProgress(null);
     setError(null);
+    setUploadNotice(null);
+
+    const BATCH_SIZE = 6;
+
     try {
       const idsToTag = items
         .filter((item) => !item.category || !item.primaryColor || !item.styleTag)
         .map((item) => item.id);
 
-      for (const id of idsToTag) {
-        // sequential to avoid rate limits
-        // eslint-disable-next-line no-await-in-loop
-        await runAutoTag(id);
+      if (idsToTag.length === 0) {
+        setBulkTagProgress("Everything is already tagged.");
+        return;
       }
+
+      setTaggingItemIds((prev) => Array.from(new Set([...prev, ...idsToTag])));
+
+      let processed = 0;
+
+      for (let start = 0; start < idsToTag.length; start += BATCH_SIZE) {
+        const chunk = idsToTag.slice(start, start + BATCH_SIZE);
+        setBulkTagProgress(`Auto-tagging ${Math.min(processed + chunk.length, idsToTag.length)}/${idsToTag.length}…`);
+
+        // sequential chunks to avoid burst/rate-limit issues
+        // eslint-disable-next-line no-await-in-loop
+        const res = await fetch("/api/ai/wardrobe/tag-batch", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ itemIds: chunk }),
+        });
+
+        // eslint-disable-next-line no-await-in-loop
+        const payload = await res.json().catch(() => null);
+
+        if (!res.ok) {
+          const code = payload?.code;
+          const errorCode = payload?.error;
+
+          if (res.status === 503 && (errorCode === "AI_UNAVAILABLE" || code === "AI_UNAVAILABLE")) {
+            setUploadNotice("Auto-tagging unavailable right now. You can still add details manually.");
+            return;
+          }
+
+          if (res.status === 503 && code === "DB_MIGRATION_REQUIRED") {
+            setUploadNotice("We’re upgrading your closet. Try again in a moment.");
+            return;
+          }
+
+          throw new Error("Bulk auto-tagging failed");
+        }
+
+        const updatedRows = Array.isArray(payload?.updated) ? payload.updated : [];
+        if (updatedRows.length > 0) {
+          const updatedById = new Map(updatedRows.map((row: WardrobeItem) => [row.id, row]));
+          setItems((prev) => prev.map((item) => {
+            const updated = updatedById.get(item.id);
+            return updated ? { ...item, ...updated } : item;
+          }));
+        }
+
+        processed += chunk.length;
+        setTaggingItemIds((prev) => prev.filter((id) => !chunk.includes(id)));
+      }
+
+      setBulkTagProgress(`Auto-tagging ${idsToTag.length}/${idsToTag.length}…`);
+    } catch (err) {
+      console.error(err);
+      setError("Auto-tagging failed");
     } finally {
       setBulkTagging(false);
+      setTaggingItemIds([]);
     }
   };
 
@@ -682,11 +742,15 @@ export default function WardrobePage() {
         disabled={bulkTagging || items.length === 0}
         className="ml-3 rounded border border-zinc-300 px-3 py-1 text-sm disabled:opacity-50"
       >
-        {bulkTagging ? "Auto-tagging…" : "Auto-tag my closet"}
+        {bulkTagging ? (bulkTagProgress || "Auto-tagging…") : "Auto-tag my closet"}
       </button>
 
       {uploadNotice && (
         <div className="mt-2 text-sm text-zinc-600">{uploadNotice}</div>
+      )}
+
+      {bulkTagProgress && bulkTagging && (
+        <div className="mt-2 text-sm text-zinc-600">{bulkTagProgress}</div>
       )}
 
       {error && <div className="mt-2 text-sm text-red-600">{error}</div>}
