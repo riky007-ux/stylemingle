@@ -7,12 +7,20 @@ const VERCEL_PROTECTION_BYPASS = process.env.VERCEL_PROTECTION_BYPASS;
 
 const nowUtc = new Date().toISOString();
 
+function printUsage() {
+  console.error("Usage:");
+  console.error('BASE_URL="https://..." SMOKE_EMAIL="..." SMOKE_PASSWORD="..." node .codex/gate-10.2x-smoke.mjs');
+  console.error('Optional: VERCEL_PROTECTION_BYPASS="..."');
+}
+
 if (!BASE_URL) {
   console.error("Missing required env var: BASE_URL");
+  printUsage();
   process.exit(1);
 }
 if (!SMOKE_EMAIL || !SMOKE_PASSWORD) {
   console.error("Missing required env vars: SMOKE_EMAIL and/or SMOKE_PASSWORD");
+  printUsage();
   process.exit(1);
 }
 
@@ -56,6 +64,14 @@ const truncate = (value, max = 500) => {
   const str = typeof value === "string" ? value : JSON.stringify(value);
   return str.length > max ? `${str.slice(0, max)}...<truncated>` : str;
 };
+
+function getAppCode(body) {
+  if (!body || typeof body !== "object") return undefined;
+  if (typeof body.code === "string") return body.code;
+  if (typeof body.error === "string") return body.error;
+  if (body.error && typeof body.error === "object" && typeof body.error.code === "string") return body.error.code;
+  return undefined;
+}
 
 async function request(path, { method = "GET", body, cookieJar, useCookies = false } = {}) {
   const headers = {
@@ -206,7 +222,7 @@ const addResult = (area, ok, detail, extra = {}) => results.push({ area, ok, det
     });
   }
 
-  const tagBatchCode = tagBatchRes.json?.code;
+  const tagBatchCode = getAppCode(tagBatchRes.json);
   const tagBatchOk =
     tagBatchRes.status === 200 ||
     (tagBatchRes.status === 503 && ["AI_UNAVAILABLE", "DB_MIGRATION_REQUIRED"].includes(tagBatchCode));
@@ -228,7 +244,7 @@ const addResult = (area, ok, detail, extra = {}) => results.push({ area, ok, det
       body: { itemId: singleTagId, force: false },
     });
   }
-  const tagCode = tagRes.json?.code;
+  const tagCode = getAppCode(tagRes.json);
   const tagOk =
     tagRes.status === 200 ||
     (tagRes.status === 503 && ["AI_UNAVAILABLE", "DB_MIGRATION_REQUIRED"].includes(tagCode));
@@ -290,7 +306,12 @@ const addResult = (area, ok, detail, extra = {}) => results.push({ area, ok, det
     console.log("\nFailing endpoint details (truncated):");
     for (const f of failures) {
       if (f.response !== undefined) {
-        console.log(`- ${f.area}: ${truncate(f.response)}`);
+        const rendered = truncate(f.response);
+        console.log(`- ${f.area}: ${rendered}`);
+        const lowered = String(rendered).toLowerCase();
+        if (lowered.includes("insufficient_quota") || lowered.includes("you exceeded your current quota")) {
+          console.log("  hint: OpenAI quota/credits issue (API billing), not app logic.");
+        }
       } else {
         console.log(`- ${f.area}`);
       }
