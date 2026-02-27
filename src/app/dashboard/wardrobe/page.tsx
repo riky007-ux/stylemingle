@@ -134,6 +134,9 @@ async function normalizeImageToJpeg(file: File) {
 
 function buildThumbnailUrl(imageUrl: string) {
   if (!imageUrl) return imageUrl;
+  if (imageUrl.startsWith("data:") || imageUrl.startsWith("blob:")) {
+    return imageUrl;
+  }
 
   try {
     const hasProtocol = /^[a-zA-Z][a-zA-Z\d+.-]*:/.test(imageUrl);
@@ -419,8 +422,11 @@ export default function WardrobePage() {
         if (!res.ok) throw new Error(payload?.error || "Bulk auto-tagging failed");
         const updatedRows = Array.isArray(payload?.updated) ? payload.updated : [];
         if (updatedRows.length > 0) {
-          const updatedById = new Map(updatedRows.map((row: WardrobeItem) => [row.id, row]));
-          setItems((prev) => prev.map((item) => updatedById.get(item.id) ? { ...item, ...updatedById.get(item.id) } : item));
+          const updatedById = new Map<string, WardrobeItem>(updatedRows.map((row: WardrobeItem) => [row.id, row]));
+          setItems((prev) => prev.map((item) => {
+            const updated = updatedById.get(item.id);
+            return updated ? { ...item, ...updated } : item;
+          }));
         }
       }
     } catch (err) {
