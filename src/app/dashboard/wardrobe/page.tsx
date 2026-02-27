@@ -2,9 +2,10 @@
 
 export const dynamic = "force-dynamic";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { upload } from "@vercel/blob/client";
 import Image from "next/image";
+import { readEnhancedImageMap, setEnhancedImage } from "@/lib/client/enhancedImageCache";
 
 type WardrobeItem = {
   id: string;
@@ -15,15 +16,24 @@ type WardrobeItem = {
   styleTag?: string | null;
 };
 
-/**
- * Client-safe unique ID generator.
- * No Node APIs, no window usage, build-safe.
- */
+type QueueStatus = "queued" | "uploading" | "normalizing" | "saving" | "tagging" | "done" | "failed" | "cancelled";
+type UploadQueueItem = {
+  id: string;
+  file: File;
+  previewUrl: string;
+  status: QueueStatus;
+  error?: string;
+  itemId?: string;
+};
+
+const BG_REMOVAL_ENABLED = process.env.NEXT_PUBLIC_BG_REMOVAL === "1";
+
 function safeUUID() {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
 const JPEG_QUALITY = 0.9;
+const UPLOAD_CONCURRENCY = 2;
 
 function getFileExtension(fileName: string) {
   const parts = fileName.split(".");
@@ -45,27 +55,13 @@ function buildJpegFileName(fileName: string) {
 function isHeicOrHeif(file: File) {
   const lowerName = file.name.toLowerCase();
   const mime = (file.type || "").toLowerCase();
-
-  const isHeic =
-    lowerName.endsWith(".heic") ||
-    mime.includes("heic");
-
-  const isHeif =
-    lowerName.endsWith(".heif") ||
-    mime.includes("heif");
-
-  return isHeic || isHeif;
+  return lowerName.endsWith(".heic") || mime.includes("heic") || lowerName.endsWith(".heif") || mime.includes("heif");
 }
 
 function isPngOrWebp(file: File) {
   const extension = getFileExtension(file.name);
   const mimeType = (file.type || "").toLowerCase();
-  return (
-    extension === "png" ||
-    extension === "webp" ||
-    mimeType === "image/png" ||
-    mimeType === "image/webp"
-  );
+  return extension === "png" || extension === "webp" || mimeType === "image/png" || mimeType === "image/webp";
 }
 
 async function canvasConvertToJpeg(file: File) {
@@ -100,17 +96,13 @@ async function canvasConvertToJpeg(file: File) {
     ctx.drawImage(image, 0, 0, width, height);
 
     const jpegBlob = await new Promise<Blob>((resolve, reject) => {
-      canvas.toBlob(
-        (blob) => {
-          if (!blob) {
-            reject(new Error("Canvas conversion failed."));
-            return;
-          }
-          resolve(blob);
-        },
-        "image/jpeg",
-        JPEG_QUALITY
-      );
+      canvas.toBlob((blob) => {
+        if (!blob) {
+          reject(new Error("Canvas conversion failed."));
+          return;
+        }
+        resolve(blob);
+      }, "image/jpeg", JPEG_QUALITY);
     });
 
     return new File([jpegBlob], buildJpegFileName(file.name), {
@@ -123,21 +115,12 @@ async function canvasConvertToJpeg(file: File) {
 }
 
 async function normalizeImageToJpeg(file: File) {
-  if (isHeicOrHeif(file)) {
-    return file;
-  }
-
-  if (isPngOrWebp(file)) {
-    return canvasConvertToJpeg(file);
-  }
+  if (isHeicOrHeif(file)) return file;
+  if (isPngOrWebp(file)) return canvasConvertToJpeg(file);
 
   const extension = getFileExtension(file.name);
   const mimeType = (file.type || "").toLowerCase();
-  const isAlreadyJpeg =
-    extension === "jpg" ||
-    extension === "jpeg" ||
-    mimeType === "image/jpeg" ||
-    mimeType === "image/jpg";
+  const isAlreadyJpeg = extension === "jpg" || extension === "jpeg" || mimeType === "image/jpeg" || mimeType === "image/jpg";
 
   if (isAlreadyJpeg) {
     return new File([file], buildJpegFileName(file.name), {
@@ -149,248 +132,36 @@ async function normalizeImageToJpeg(file: File) {
   return canvasConvertToJpeg(file);
 }
 
-function extractFilename(imageUrl: string) {
-  if (!imageUrl) return "";
-  try {
-    const url = new URL(imageUrl, "http://localhost");
-    const pathname = url.pathname || "";
-    const basename = pathname.split("/").pop() || "";
-    return decodeURIComponent(basename);
-  } catch {
-    return imageUrl;
-  }
-}
-
-function formatUploadDate(createdAt?: string) {
-  if (!createdAt) return "";
-  const d = new Date(createdAt);
-  if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleDateString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
-}
-
-function buildItemLabel(item: WardrobeItem) {
-  const file = extractFilename(item.imageUrl);
-  const date = formatUploadDate(item.createdAt);
-  const filePart = file ? file : "Wardrobe item";
-  return date ? `${filePart} • ${date}` : filePart;
-}
-
 function buildThumbnailUrl(imageUrl: string) {
   if (!imageUrl) return imageUrl;
 
   try {
     const hasProtocol = /^[a-zA-Z][a-zA-Z\d+.-]*:/.test(imageUrl);
-    const parsedUrl = hasProtocol
-      ? new URL(imageUrl)
-      : new URL(imageUrl, "https://thumbnail.local");
-
-    parsedUrl.searchParams.delete("w");
-    parsedUrl.searchParams.delete("h");
-    parsedUrl.searchParams.delete("fit");
-    parsedUrl.searchParams.delete("q");
+    const parsedUrl = hasProtocol ? new URL(imageUrl) : new URL(imageUrl, "https://thumbnail.local");
 
     parsedUrl.searchParams.set("w", "400");
     parsedUrl.searchParams.set("h", "400");
     parsedUrl.searchParams.set("fit", "cover");
     parsedUrl.searchParams.set("q", "75");
 
-    if (hasProtocol) {
-      return parsedUrl.toString();
-    }
-
-    const normalizedPath = imageUrl.startsWith("/")
-      ? parsedUrl.pathname
-      : parsedUrl.pathname.replace(/^\/+/, "");
-
+    if (hasProtocol) return parsedUrl.toString();
+    const normalizedPath = imageUrl.startsWith("/") ? parsedUrl.pathname : parsedUrl.pathname.replace(/^\/+/, "");
     return `${normalizedPath}${parsedUrl.search}${parsedUrl.hash}`;
   } catch {
     return imageUrl;
   }
 }
 
-
-function addCacheBuster(url: string, stamp: number) {
-  const parsed = new URL(url, window.location.origin);
-  parsed.searchParams.set("_sm", String(stamp));
-
-  const hasProtocol = /^[a-zA-Z][a-zA-Z\d+.-]*:/.test(url);
-  if (hasProtocol) {
-    return parsed.toString();
-  }
-
-  const normalizedPath = url.startsWith("/")
-    ? parsed.pathname
-    : parsed.pathname.replace(/^\/+/, "");
-
-  return `${normalizedPath}${parsed.search}${parsed.hash}`;
-}
-
-type ResilientImageProps = {
-  src: string;
-  alt: string;
-  className?: string;
-};
-
-const MAX_TOTAL_RETRY_MS = 25_000;
-const BASE_DELAY_MS = 600;
-const MAX_DELAY_MS = 3000;
-
-function ResilientImage({
-  src,
-  alt,
-  className,
-}: ResilientImageProps) {
-  const [currentSrc, setCurrentSrc] = useState(src);
-  const [attempt, setAttempt] = useState(0);
-  const [status, setStatus] = useState<"loading" | "retrying" | "loaded" | "failed">("loading");
-  const retryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const hasLoadedRef = useRef(false);
-  const retryWindowStartRef = useRef<number | null>(null);
-
-  const clearRetryTimer = useCallback(() => {
-    if (retryTimeoutRef.current) {
-      clearTimeout(retryTimeoutRef.current);
-      retryTimeoutRef.current = null;
-    }
-  }, []);
-
-  useEffect(() => {
-    clearRetryTimer();
-    hasLoadedRef.current = false;
-    retryWindowStartRef.current = null;
-    setCurrentSrc(src);
-    setAttempt(0);
-    setStatus("loading");
-
-    return () => {
-      clearRetryTimer();
-    };
-  }, [clearRetryTimer, src]);
-
-  const scheduleRetry = (currentAttempt: number) => {
-    if (hasLoadedRef.current) {
-      return;
-    }
-
-    const retryWindowStart = retryWindowStartRef.current ?? Date.now();
-    retryWindowStartRef.current = retryWindowStart;
-
-    const elapsedMs = Date.now() - retryWindowStart;
-    const remainingMs = MAX_TOTAL_RETRY_MS - elapsedMs;
-    if (remainingMs <= 0) {
-      clearRetryTimer();
-      setStatus("failed");
-      return;
-    }
-
-    const nextDelayMs = Math.min(BASE_DELAY_MS * 2 ** currentAttempt, MAX_DELAY_MS, remainingMs);
-    setStatus("retrying");
-
-    if (process.env.NEXT_PUBLIC_SM_UPLOAD_DIAGNOSTICS === "1") {
-      console.debug("ResilientImage retry", {
-        attempt: currentAttempt + 1,
-        elapsedMs,
-        nextDelayMs,
-      });
-    }
-
-    clearRetryTimer();
-    retryTimeoutRef.current = setTimeout(() => {
-      if (hasLoadedRef.current) {
-        return;
-      }
-
-      const now = Date.now();
-      const elapsed = now - (retryWindowStartRef.current ?? now);
-      if (elapsed >= MAX_TOTAL_RETRY_MS) {
-        setStatus("failed");
-        clearRetryTimer();
-        return;
-      }
-
-      setAttempt((previous) => previous + 1);
-      setCurrentSrc(addCacheBuster(src, now));
-    }, nextDelayMs);
-  };
-
-  const restartRetries = () => {
-    clearRetryTimer();
-    hasLoadedRef.current = false;
-    retryWindowStartRef.current = Date.now();
-    setAttempt(0);
-    setStatus("retrying");
-    setCurrentSrc(addCacheBuster(src, Date.now()));
-  };
-
-  const handleLoad = () => {
-    hasLoadedRef.current = true;
-    clearRetryTimer();
-    setStatus("loaded");
-  };
-
-  const handleError = () => {
-    if (hasLoadedRef.current) {
-      return;
-    }
-
-    scheduleRetry(attempt);
-  };
-
-  return (
-    <>
-      {status === "failed" ? (
-        <div className="flex h-full w-full flex-col items-center justify-center gap-2 px-3 text-center text-sm text-zinc-600">
-          <div className="font-medium">Preview unavailable</div>
-          <button
-            type="button"
-            onClick={restartRetries}
-            className="rounded-md border border-zinc-300 bg-white/90 px-2.5 py-1 text-xs font-medium text-zinc-700 transition hover:bg-white focus:outline-none focus:ring-2 focus:ring-zinc-400"
-          >
-            Try again
-          </button>
-        </div>
-      ) : (
-        <Image
-          key={currentSrc}
-          src={currentSrc}
-          alt={alt}
-          width={400}
-          height={400}
-          className={className}
-          sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
-          loading="lazy"
-          referrerPolicy="no-referrer"
-          onLoad={handleLoad}
-          onError={handleError}
-          unoptimized
-        />
-      )}
-
-      {status === "retrying" && (
-        <div
-          className="pointer-events-none absolute left-2 top-2 inline-flex items-center gap-1.5 rounded bg-black/60 px-2 py-1 text-[11px] font-medium text-white"
-          aria-live="polite"
-        >
-          <span className="h-3 w-3 animate-spin rounded-full border border-white/40 border-t-white" />
-          Processing…
-        </div>
-      )}
-    </>
-  );
-}
-
 function WardrobeItemCard({
   item,
+  displayImageUrl,
   onDelete,
   onSaveDetails,
   onRetag,
   isTagging,
 }: {
   item: WardrobeItem;
+  displayImageUrl: string;
   onDelete: (id: string) => Promise<void>;
   onSaveDetails: (id: string, updates: Partial<WardrobeItem>) => Promise<void>;
   onRetag: (id: string) => Promise<void>;
@@ -402,29 +173,16 @@ function WardrobeItemCard({
   const [primaryColor, setPrimaryColor] = useState(item.primaryColor || "");
   const [styleTag, setStyleTag] = useState(item.styleTag || "");
 
-  const label = buildItemLabel(item);
-  const thumbnailUrl = buildThumbnailUrl(item.imageUrl);
-
   return (
     <div className="relative aspect-square w-full overflow-hidden rounded-xl bg-zinc-100">
-      <ResilientImage
-        src={thumbnailUrl}
-        alt={label}
-        className="h-full w-full object-cover pointer-events-none"
-      />
-
+      <Image src={buildThumbnailUrl(displayImageUrl)} alt="Wardrobe item" width={400} height={400} className="h-full w-full object-cover pointer-events-none" unoptimized />
       <button
         type="button"
-        aria-label="Delete wardrobe item"
-        className="absolute right-2 top-2 rounded bg-red-600 px-2 py-1 text-xs font-semibold text-white shadow-sm transition hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-400 focus:ring-offset-1 disabled:cursor-not-allowed disabled:bg-red-400"
+        className="absolute right-2 top-2 rounded bg-red-600 px-2 py-1 text-xs font-semibold text-white"
         disabled={deleting}
         onClick={async () => {
           if (deleting) return;
-          if (typeof confirm === "function") {
-            const ok = confirm("Delete this wardrobe item?");
-            if (!ok) return;
-          }
-
+          if (typeof confirm === "function" && !confirm("Delete this wardrobe item?")) return;
           setDeleting(true);
           try {
             await onDelete(item.id);
@@ -435,35 +193,16 @@ function WardrobeItemCard({
       >
         Delete
       </button>
-
-      <div className="pointer-events-none absolute bottom-0 left-0 right-0 bg-black/40 px-2 py-1">
-        <div className="truncate text-xs text-white">{label}</div>
-      </div>
-
-      <button
-        type="button"
-        className="absolute left-2 top-2 rounded bg-white/90 px-2 py-1 text-xs font-medium text-zinc-800"
-        onClick={() => setEditing((v) => !v)}
-      >
+      <button type="button" className="absolute left-2 top-2 rounded bg-white/90 px-2 py-1 text-xs" onClick={() => setEditing((v) => !v)}>
         {item.category ? "Edit" : "Add details"}
       </button>
-
-      {isTagging && (
-        <div className="absolute left-2 top-10 rounded bg-black/70 px-2 py-1 text-[11px] text-white">Analyzing…</div>
-      )}
-
-      <div className="absolute right-2 bottom-10 rounded bg-white/85 px-2 py-1 text-[11px] text-zinc-800">
+      {isTagging && <div className="absolute left-2 top-10 rounded bg-black/70 px-2 py-1 text-[11px] text-white">Analyzing…</div>}
+      <div className="absolute right-2 bottom-10 rounded bg-white/85 px-2 py-1 text-[11px]">
         <div className="capitalize">{item.category || "unknown"}</div>
         <div className="capitalize">{item.primaryColor || "unknown"}</div>
         <div className="capitalize">{item.styleTag || "unknown"}</div>
       </div>
-
-      <button
-        type="button"
-        className="absolute right-2 bottom-2 rounded bg-white/90 px-2 py-1 text-[11px] font-medium text-zinc-700"
-        onClick={() => onRetag(item.id)}
-        disabled={isTagging}
-      >
+      <button type="button" className="absolute right-2 bottom-2 rounded bg-white/90 px-2 py-1 text-[11px]" onClick={() => onRetag(item.id)} disabled={isTagging}>
         Re-tag
       </button>
 
@@ -491,26 +230,28 @@ function WardrobeItemCard({
 
 export default function WardrobePage() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const activeWorkersRef = useRef(0);
+  const cancelQueuedRef = useRef(false);
 
   const [items, setItems] = useState<WardrobeItem[]>([]);
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [uploadNotice, setUploadNotice] = useState<string | null>(null);
   const [taggingItemIds, setTaggingItemIds] = useState<string[]>([]);
   const [bulkTagging, setBulkTagging] = useState(false);
   const [bulkTagProgress, setBulkTagProgress] = useState<string | null>(null);
+  const [queue, setQueue] = useState<UploadQueueItem[]>([]);
+  const [enhancePhoto, setEnhancePhoto] = useState(BG_REMOVAL_ENABLED);
+  const [enhancedMap, setEnhancedMap] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    setEnhancedMap(readEnhancedImageMap());
+  }, []);
 
   async function loadItems() {
     try {
       const res = await fetch("/api/wardrobe/items");
       const data = await res.json();
-      if (!res.ok) {
-        if (data?.code === "DB_MIGRATION_REQUIRED") {
-          setUploadNotice("We’re upgrading your closet. Try again in a moment.");
-          return;
-        }
-        throw new Error("Failed to load wardrobe");
-      }
+      if (!res.ok) throw new Error("Failed to load wardrobe");
       setItems(data);
     } catch (err) {
       console.error(err);
@@ -522,25 +263,23 @@ export default function WardrobePage() {
     loadItems();
   }, []);
 
-  const handleDelete = async (id: string) => {
-    setError(null);
-
-    // Optimistic removal
-    setItems((prev) => prev.filter((item) => item.id !== id));
-
+  const runAutoTag = async (itemId: string, force = false) => {
+    setTaggingItemIds((prev) => (prev.includes(itemId) ? prev : [...prev, itemId]));
     try {
-      const res = await fetch(`/api/wardrobe/items?id=${encodeURIComponent(id)}`, {
-        method: "DELETE",
-        credentials: "same-origin",
+      const res = await fetch("/api/ai/wardrobe/tag", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ itemId, force }),
       });
-
-      if (!res.ok) {
-        throw new Error("Failed to delete wardrobe item");
-      }
+      const payload = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(payload?.error || "Auto-tagging failed");
+      setItems((prev) => prev.map((item) => (item.id === itemId ? { ...item, ...payload } : item)));
+      return true;
     } catch (err) {
       console.error(err);
-      setError("Delete failed");
-      await loadItems();
+      return false;
+    } finally {
+      setTaggingItemIds((prev) => prev.filter((id) => id !== itemId));
     }
   };
 
@@ -556,215 +295,226 @@ export default function WardrobePage() {
     }
   };
 
-  const runAutoTag = async (itemId: string, force = false) => {
-    setTaggingItemIds((prev) => (prev.includes(itemId) ? prev : [...prev, itemId]));
-    try {
-      const res = await fetch("/api/ai/wardrobe/tag", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ itemId, force }),
-      });
+  const updateQueueStatus = useCallback((id: string, status: QueueStatus, extra?: Partial<UploadQueueItem>) => {
+    setQueue((prev) => prev.map((entry) => (entry.id === id ? { ...entry, status, ...extra } : entry)));
+  }, []);
 
-      const payload = await res.json().catch(() => null);
-      if (!res.ok) {
-        if (payload?.error === "AI_UNAVAILABLE") {
-          setUploadNotice("Auto-tagging unavailable right now. You can still add details manually.");
-          return;
+  const processQueueItem = useCallback(async (entry: UploadQueueItem) => {
+    updateQueueStatus(entry.id, "normalizing");
+
+    try {
+      let normalizedFile = isHeicOrHeif(entry.file) ? entry.file : await normalizeImageToJpeg(entry.file);
+      let enhancedPreview = "";
+
+      if (BG_REMOVAL_ENABLED && enhancePhoto && !isHeicOrHeif(normalizedFile)) {
+        try {
+          const remover = await import("@/lib/client/removeBackground");
+          const enhanced = await remover.removeBackgroundClientSide(normalizedFile);
+          normalizedFile = enhanced.file;
+          enhancedPreview = enhanced.previewUrl;
+        } catch (bgErr) {
+          console.warn("Background removal failed, using original", bgErr);
         }
-        throw new Error("Auto-tagging failed");
       }
 
-      setItems((prev) => prev.map((item) => (item.id === itemId ? { ...item, ...payload } : item)));
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setTaggingItemIds((prev) => prev.filter((id) => id !== itemId));
-    }
-  };
-
-  const handleAutoTagCloset = async () => {
-    setBulkTagging(true);
-    setBulkTagProgress(null);
-    setError(null);
-    setUploadNotice(null);
-
-    const BATCH_SIZE = 6;
-
-    try {
-      const idsToTag = items
-        .filter((item) => !item.category || !item.primaryColor || !item.styleTag)
-        .map((item) => item.id);
-
-      if (idsToTag.length === 0) {
-        setBulkTagProgress("Everything is already tagged.");
+      if (cancelQueuedRef.current) {
+        updateQueueStatus(entry.id, "cancelled");
         return;
       }
 
-      setTaggingItemIds((prev) => Array.from(new Set([...prev, ...idsToTag])));
+      updateQueueStatus(entry.id, "uploading");
+      const uploadPath = `wardrobe/${safeUUID()}-${normalizedFile.name.replace(/\s+/g, "-")}`;
+      const blob = await upload(uploadPath, normalizedFile, {
+        access: "public",
+        handleUploadUrl: "/api/wardrobe/blob",
+      });
 
-      let processed = 0;
-
-      for (let start = 0; start < idsToTag.length; start += BATCH_SIZE) {
-        const chunk = idsToTag.slice(start, start + BATCH_SIZE);
-        setBulkTagProgress(`Auto-tagging ${Math.min(processed + chunk.length, idsToTag.length)}/${idsToTag.length}…`);
-
-        // sequential chunks to avoid burst/rate-limit issues
-        // eslint-disable-next-line no-await-in-loop
-        const res = await fetch("/api/ai/wardrobe/tag-batch", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ itemIds: chunk }),
-        });
-
-        // eslint-disable-next-line no-await-in-loop
-        const payload = await res.json().catch(() => null);
-
-        if (!res.ok) {
-          const code = payload?.code;
-          const errorCode = payload?.error;
-
-          if (res.status === 503 && (errorCode === "AI_UNAVAILABLE" || code === "AI_UNAVAILABLE")) {
-            setUploadNotice("Auto-tagging unavailable right now. You can still add details manually.");
-            return;
-          }
-
-          if (res.status === 503 && code === "DB_MIGRATION_REQUIRED") {
-            setUploadNotice("We’re upgrading your closet. Try again in a moment.");
-            return;
-          }
-
-          throw new Error("Bulk auto-tagging failed");
-        }
-
-        const updatedRows = Array.isArray(payload?.updated) ? payload.updated : [];
-        if (updatedRows.length > 0) {
-          const updatedById = new Map(updatedRows.map((row: WardrobeItem) => [row.id, row]));
-          setItems((prev) => prev.map((item) => {
-            const updated = updatedById.get(item.id);
-            return updated ? { ...item, ...updated } : item;
-          }));
-        }
-
-        processed += chunk.length;
-        setTaggingItemIds((prev) => prev.filter((id) => !chunk.includes(id)));
+      if (cancelQueuedRef.current) {
+        updateQueueStatus(entry.id, "cancelled");
+        return;
       }
 
-      setBulkTagProgress(`Auto-tagging ${idsToTag.length}/${idsToTag.length}…`);
-    } catch (err) {
-      console.error(err);
-      setError("Auto-tagging failed");
-    } finally {
-      setBulkTagging(false);
-      setTaggingItemIds([]);
-    }
-  };
-
-  async function handleUpload(file: File) {
-    setError(null);
-    setUploadNotice(null);
-    setLoading(true);
-
-    try {
-      const normalizedFile = isHeicOrHeif(file) ? file : await normalizeImageToJpeg(file);
-      const uploadPath = `wardrobe/${safeUUID()}.jpg`;
-
-      const blob = await upload(
-        uploadPath,
-        normalizedFile,
-        {
-          access: "public",
-          handleUploadUrl: "/api/wardrobe/blob",
-        }
-      );
-
+      updateQueueStatus(entry.id, "saving");
       const res = await fetch("/api/wardrobe/items", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ imageUrl: blob.url }),
       });
 
-      if (!res.ok) {
-        const payload = await res.json().catch(() => null);
-        if (payload?.code === "DB_MIGRATION_REQUIRED") {
-          setUploadNotice("We’re upgrading your closet. Try again in a moment.");
-          setError(null);
-          return;
-        }
-        throw new Error("Failed to save wardrobe item");
-      }
+      if (!res.ok) throw new Error("Failed to save wardrobe item");
 
       const created = await res.json();
       setItems((prev) => [created, ...prev]);
-      void runAutoTag(created.id);
+      if (enhancedPreview) {
+        setEnhancedImage(created.id, enhancedPreview);
+        setEnhancedMap((prev) => ({ ...prev, [created.id]: enhancedPreview }));
+      }
+
+      updateQueueStatus(entry.id, "tagging", { itemId: created.id });
+      const tagged = await runAutoTag(created.id, false);
+      if (!tagged) {
+        updateQueueStatus(entry.id, "failed", { itemId: created.id, error: "Tagging failed. Item saved." });
+        return;
+      }
+
+      updateQueueStatus(entry.id, "done", { itemId: created.id });
     } catch (err) {
       console.error(err);
-      setUploadNotice(
-        "Sorry, we couldn’t process that image — try another one."
-      );
-      setError("Upload failed");
-    } finally {
-      setLoading(false);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = "";
-      }
+      updateQueueStatus(entry.id, "failed", { error: "Upload failed" });
     }
-  }
+  }, [enhancePhoto, runAutoTag, updateQueueStatus]);
+
+  useEffect(() => {
+    const launchWorkers = async () => {
+      if (cancelQueuedRef.current) return;
+
+      const waiting = queue.filter((q) => q.status === "queued");
+      const capacity = UPLOAD_CONCURRENCY - activeWorkersRef.current;
+      if (capacity <= 0 || waiting.length === 0) return;
+
+      waiting.slice(0, capacity).forEach((entry) => {
+        activeWorkersRef.current += 1;
+        void processQueueItem(entry).finally(() => {
+          activeWorkersRef.current -= 1;
+        });
+      });
+    };
+
+    void launchWorkers();
+  }, [processQueueItem, queue]);
+
+  const queueSummary = useMemo(() => {
+    const total = queue.length;
+    const uploaded = queue.filter((q) => ["saving", "tagging", "done", "failed"].includes(q.status)).length;
+    const tagged = queue.filter((q) => ["done", "failed"].includes(q.status)).length;
+    return {
+      total,
+      uploaded,
+      tagged,
+    };
+  }, [queue]);
+
+  const handleAutoTagCloset = async () => {
+    setBulkTagging(true);
+    setBulkTagProgress(null);
+    setError(null);
+    const BATCH_SIZE = 6;
+    try {
+      const idsToTag = items.filter((item) => !item.category || !item.primaryColor || !item.styleTag).map((item) => item.id);
+      if (idsToTag.length === 0) {
+        setBulkTagProgress("Everything is already tagged.");
+        return;
+      }
+      for (let start = 0; start < idsToTag.length; start += BATCH_SIZE) {
+        const chunk = idsToTag.slice(start, start + BATCH_SIZE);
+        setBulkTagProgress(`Auto-tagging ${Math.min(start + chunk.length, idsToTag.length)}/${idsToTag.length}…`);
+        // eslint-disable-next-line no-await-in-loop
+        const res = await fetch("/api/ai/wardrobe/tag-batch", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ itemIds: chunk }),
+        });
+        // eslint-disable-next-line no-await-in-loop
+        const payload = await res.json().catch(() => null);
+        if (!res.ok) throw new Error(payload?.error || "Bulk auto-tagging failed");
+        const updatedRows = Array.isArray(payload?.updated) ? payload.updated : [];
+        if (updatedRows.length > 0) {
+          const updatedById = new Map(updatedRows.map((row: WardrobeItem) => [row.id, row]));
+          setItems((prev) => prev.map((item) => updatedById.get(item.id) ? { ...item, ...updatedById.get(item.id) } : item));
+        }
+      }
+    } catch (err) {
+      console.error(err);
+      setError("Auto-tagging failed");
+    } finally {
+      setBulkTagging(false);
+    }
+  };
+
+  const enqueueFiles = (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    cancelQueuedRef.current = false;
+    const incoming: UploadQueueItem[] = Array.from(files).map((file) => ({
+      id: safeUUID(),
+      file,
+      previewUrl: URL.createObjectURL(file),
+      status: "queued",
+    }));
+    setQueue((prev) => [...incoming, ...prev]);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const cancelAll = () => {
+    cancelQueuedRef.current = true;
+    setQueue((prev) => prev.map((entry) => (entry.status === "queued" ? { ...entry, status: "cancelled" } : entry)));
+  };
 
   return (
     <div className="p-6 max-w-5xl mx-auto">
       <h1 className="text-2xl font-semibold mb-4">Wardrobe</h1>
+      <p className="mb-4 text-sm text-zinc-600">Upload outfit pieces and manage your wardrobe.</p>
 
-      <p className="mb-4 text-sm text-zinc-600">
-        Upload outfit pieces and manage your wardrobe.
-      </p>
+      <input ref={fileInputRef} type="file" accept="image/*" multiple onChange={(e) => enqueueFiles(e.target.files)} />
+      {BG_REMOVAL_ENABLED && (
+        <label className="ml-3 text-sm inline-flex items-center gap-2">
+          <input type="checkbox" checked={enhancePhoto} onChange={(e) => setEnhancePhoto(e.target.checked)} />
+          Enhance photo (remove background)
+        </label>
+      )}
 
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="image/*"
-        disabled={loading}
-        onChange={(e) => {
-          const file = e.target.files?.[0];
-          if (!file) return;
-
-          if (isHeicOrHeif(file)) {
-            void handleUpload(file);
-            return;
-          }
-
-          void handleUpload(file);
-        }}
-      />
-
-      <button
-        type="button"
-        onClick={handleAutoTagCloset}
-        disabled={bulkTagging || items.length === 0}
-        className="ml-3 rounded border border-zinc-300 px-3 py-1 text-sm disabled:opacity-50"
-      >
+      <button type="button" onClick={handleAutoTagCloset} disabled={bulkTagging || items.length === 0} className="ml-3 rounded border border-zinc-300 px-3 py-1 text-sm disabled:opacity-50">
         {bulkTagging ? (bulkTagProgress || "Auto-tagging…") : "Auto-tag my closet"}
       </button>
 
-      {uploadNotice && (
-        <div className="mt-2 text-sm text-zinc-600">{uploadNotice}</div>
+      {queue.length > 0 && (
+        <div className="mt-4 rounded-xl border p-3 bg-zinc-50">
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-medium">Uploading {queueSummary.uploaded}/{queueSummary.total} · Tagging {queueSummary.tagged}/{queueSummary.total}</p>
+            <button type="button" onClick={cancelAll} className="text-xs rounded border px-2 py-1">Abort / Cancel All</button>
+          </div>
+          <ul className="mt-3 space-y-2 max-h-64 overflow-auto">
+            {queue.map((entry) => (
+              <li key={entry.id} className="flex items-center gap-2 rounded border bg-white p-2 text-xs">
+                <Image src={entry.previewUrl} alt={entry.file.name} width={38} height={38} className="h-10 w-10 rounded object-cover" unoptimized />
+                <div className="flex-1 min-w-0">
+                  <p className="truncate">{entry.file.name}</p>
+                  <p className="capitalize text-zinc-500">{entry.status}{entry.error ? ` · ${entry.error}` : ""}</p>
+                </div>
+                {entry.status === "failed" && entry.itemId && (
+                  <button
+                    type="button"
+                    className="rounded border px-2 py-1"
+                    onClick={async () => {
+                      const tagged = await runAutoTag(entry.itemId!, true);
+                      if (tagged) updateQueueStatus(entry.id, "done", { error: undefined });
+                    }}
+                  >
+                    Retry tag
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
 
-      {bulkTagProgress && bulkTagging && (
-        <div className="mt-2 text-sm text-zinc-600">{bulkTagProgress}</div>
-      )}
-
+      {uploadNotice && <div className="mt-2 text-sm text-zinc-600">{uploadNotice}</div>}
       {error && <div className="mt-2 text-sm text-red-600">{error}</div>}
-
-      {loading && (
-        <div className="mt-4 text-sm text-zinc-600">Uploading…</div>
-      )}
 
       <div className="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
         {items.map((item) => (
           <WardrobeItemCard
             key={item.id}
             item={item}
-            onDelete={handleDelete}
+            displayImageUrl={enhancedMap[item.id] || item.imageUrl}
+            onDelete={async (id) => {
+              setItems((prev) => prev.filter((it) => it.id !== id));
+              const res = await fetch(`/api/wardrobe/items?id=${encodeURIComponent(id)}`, { method: "DELETE", credentials: "same-origin" });
+              if (!res.ok) {
+                setError("Delete failed");
+                await loadItems();
+              }
+            }}
             onSaveDetails={handleSaveDetails}
             onRetag={(id) => runAutoTag(id, true)}
             isTagging={taggingItemIds.includes(item.id)}
