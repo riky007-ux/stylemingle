@@ -638,10 +638,13 @@ export default function WardrobePage() {
 
         const updatedRows = Array.isArray(payload?.updated) ? payload.updated : [];
         if (updatedRows.length > 0) {
-          const updatedById = new Map(updatedRows.map((row: WardrobeItem) => [row.id, row]));
+          const updatedById = new Map<string, WardrobeItem>(
+            updatedRows.map((row: WardrobeItem) => [row.id, row])
+          );
           setItems((prev) => prev.map((item) => {
             const updated = updatedById.get(item.id);
-            return updated ? { ...item, ...updated } : item;
+            if (!updated || typeof updated !== "object") return item;
+            return { ...item, ...updated };
           }));
         }
 
