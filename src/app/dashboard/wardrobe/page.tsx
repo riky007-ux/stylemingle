@@ -522,7 +522,9 @@ export default function WardrobePage() {
               }
             }}
             onSaveDetails={handleSaveDetails}
-            onRetag={(id) => runAutoTag(id, true)}
+            onRetag={async (id) => {
+              await runAutoTag(id, true);
+            }}
             isTagging={taggingItemIds.includes(item.id)}
           />
         ))}

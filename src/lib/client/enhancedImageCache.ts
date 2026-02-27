@@ -11,6 +11,11 @@ export function readEnhancedImageMap(): EnhancedImageMap {
     const parsed = JSON.parse(raw);
     return parsed && typeof parsed === "object" ? parsed : {};
   } catch {
+    try {
+      localStorage.removeItem(CACHE_KEY);
+    } catch {
+      // ignore cleanup failures
+    }
     return {};
   }
 }
