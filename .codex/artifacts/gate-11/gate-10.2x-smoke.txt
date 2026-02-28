@@ -1,0 +1,40 @@
+
+Gate 10.2.x Smoke Sprint Report
+============================================================
+URL tested: https://stylemingle-rfirvs9ew-dorian-hartwoods-projects.vercel.app
+Timestamp UTC: 2026-02-28T05:19:14.394Z
+Wardrobe items found: 0
+IDs sent to tag-batch: 0
+------------------------------------------------------------
+RESULT | CHECK | DETAIL
+FAIL | A) Reachability / | GET / -> 0
+FAIL | A) Reachability /login | GET /login -> 0
+FAIL | A) Reachability /signup | GET /signup -> 0
+FAIL | B) Auth (login + cookie) | POST /api/auth/login -> 0; cookie=missing
+FAIL | C) Unauth guard items | GET /api/wardrobe/items -> 0
+FAIL | C) Unauth guard tag | POST /api/ai/wardrobe/tag -> 0
+FAIL | C) Unauth guard tag-batch | POST /api/ai/wardrobe/tag-batch -> 0
+FAIL | C) Unauth guard outfit | POST /api/ai/outfit -> 0
+FAIL | D) Wardrobe items list | GET /api/wardrobe/items -> 0; count=0
+FAIL | D) Wardrobe readiness | Smoke account has no wardrobe items; add at least 3 (top/bottom/shoes) and re-run.
+FAIL | E) Tag-batch | POST /api/ai/wardrobe/tag-batch -> 0
+FAIL | F) Single tag | POST /api/ai/wardrobe/tag -> 0
+FAIL | G) Outfit | POST /api/ai/outfit -> 0
+------------------------------------------------------------
+TOTAL: 0 PASS / 13 FAIL
+
+Failing endpoint details (truncated):
+- A) Reachability /
+- A) Reachability /login
+- A) Reachability /signup
+- B) Auth (login + cookie): network_error: fetch failed
+- C) Unauth guard items: network_error: fetch failed
+- C) Unauth guard tag: network_error: fetch failed
+- C) Unauth guard tag-batch: network_error: fetch failed
+- C) Unauth guard outfit: network_error: fetch failed
+- D) Wardrobe items list: network_error: fetch failed
+- D) Wardrobe readiness
+- E) Tag-batch: skipped
+- F) Single tag: skipped
+- G) Outfit: skipped
+EXIT_CODE=1
