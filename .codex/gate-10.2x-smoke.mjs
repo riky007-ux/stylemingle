@@ -16,12 +16,12 @@ function printUsage() {
 if (!BASE_URL) {
   console.error("Missing required env var: BASE_URL");
   printUsage();
-  process.exit(1);
+  process.exit(2);
 }
 if (!SMOKE_EMAIL || !SMOKE_PASSWORD) {
   console.error("Missing required env vars: SMOKE_EMAIL and/or SMOKE_PASSWORD");
   printUsage();
-  process.exit(1);
+  process.exit(2);
 }
 
 class CookieJar {

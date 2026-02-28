@@ -1,0 +1,103 @@
+name: Gate 11 Proof
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: "Preview BASE_URL to validate (e.g. https://...vercel.app)"
+        required: true
+        type: string
+      vercel_protection_bypass:
+        description: "Optional x-vercel-protection-bypass override"
+        required: false
+        type: string
+
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      BASE_URL: ${{ inputs.base_url }}
+      SMOKE_EMAIL: ${{ secrets.SMOKE_EMAIL }}
+      SMOKE_PASSWORD: ${{ secrets.SMOKE_PASSWORD }}
+      VERCEL_PROTECTION_BYPASS: ${{ inputs.vercel_protection_bypass != '' && inputs.vercel_protection_bypass || secrets.VERCEL_PROTECTION_BYPASS }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Validate required inputs/secrets
+        run: |
+          set -euo pipefail
+          if [ -z "${BASE_URL:-}" ]; then
+            echo "Missing required workflow input: base_url"
+            exit 2
+          fi
+          if [ -z "${SMOKE_EMAIL:-}" ]; then
+            echo "Missing required repository secret: SMOKE_EMAIL"
+            exit 2
+          fi
+          if [ -z "${SMOKE_PASSWORD:-}" ]; then
+            echo "Missing required repository secret: SMOKE_PASSWORD"
+            exit 2
+          fi
+
+      - name: Prepare artifact directory
+        run: mkdir -p .codex/artifacts/gate-11
+
+      - name: Run Gate 11 proof
+        id: gate11
+        run: |
+          set +e
+          node .codex/gate-11-proof.mjs > .codex/artifacts/gate-11/ci-gate-11-proof.txt 2>&1
+          code=$?
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          echo "EXIT_CODE=$code" >> .codex/artifacts/gate-11/ci-gate-11-proof.txt
+          exit 0
+
+      - name: Run Gate 10.2x smoke
+        id: gate102x
+        run: |
+          set +e
+          node .codex/gate-10.2x-smoke.mjs > .codex/artifacts/gate-11/ci-gate-10.2x-smoke.txt 2>&1
+          code=$?
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          echo "EXIT_CODE=$code" >> .codex/artifacts/gate-11/ci-gate-10.2x-smoke.txt
+          exit 0
+
+      - name: Upload proof artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate-11-proof-artifacts
+          path: |
+            .codex/artifacts/gate-11/ci-gate-11-proof.txt
+            .codex/artifacts/gate-11/ci-gate-10.2x-smoke.txt
+
+      - name: Write job summary
+        run: |
+          {
+            echo "## Gate 11 Proof Summary"
+            echo
+            echo "- BASE_URL: ${BASE_URL}"
+            echo "- gate-11-proof exit code: ${{ steps.gate11.outputs.exit_code }}"
+            echo "- gate-10.2x-smoke exit code: ${{ steps.gate102x.outputs.exit_code }}"
+            echo
+            echo "### gate-11-proof.mjs"
+            grep -E "^TOTAL:" .codex/artifacts/gate-11/ci-gate-11-proof.txt || tail -n 20 .codex/artifacts/gate-11/ci-gate-11-proof.txt
+            echo
+            echo "### gate-10.2x-smoke.mjs"
+            grep -E "^TOTAL:" .codex/artifacts/gate-11/ci-gate-10.2x-smoke.txt || tail -n 20 .codex/artifacts/gate-11/ci-gate-10.2x-smoke.txt
+            echo
+            echo "> Reminder: verify Vercel runtime logs for expected endpoint signatures (/api/ai/wardrobe/tag, /api/ai/wardrobe/tag-batch, /api/ai/outfit, and upload pipeline endpoints)."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail workflow if either proof script failed
+        if: steps.gate11.outputs.exit_code != '0' || steps.gate102x.outputs.exit_code != '0'
+        run: |
+          echo "One or more proof scripts failed. See uploaded artifacts and job summary."
+          exit 1

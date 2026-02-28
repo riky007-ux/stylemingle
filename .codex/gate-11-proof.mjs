@@ -5,9 +5,16 @@ const SMOKE_EMAIL = process.env.SMOKE_EMAIL;
 const SMOKE_PASSWORD = process.env.SMOKE_PASSWORD;
 const VERCEL_PROTECTION_BYPASS = process.env.VERCEL_PROTECTION_BYPASS;
 
-if (!BASE_URL || !SMOKE_EMAIL || !SMOKE_PASSWORD) {
+if (!BASE_URL) {
+  console.error('Missing required env var: BASE_URL');
   console.error('Usage: BASE_URL="https://..." SMOKE_EMAIL="..." SMOKE_PASSWORD="..." node .codex/gate-11-proof.mjs');
-  process.exit(1);
+  process.exit(2);
+}
+
+if (!SMOKE_EMAIL || !SMOKE_PASSWORD) {
+  console.error('Missing required env vars: SMOKE_EMAIL and/or SMOKE_PASSWORD');
+  console.error('Usage: BASE_URL="https://..." SMOKE_EMAIL="..." SMOKE_PASSWORD="..." node .codex/gate-11-proof.mjs');
+  process.exit(2);
 }
 
 class CookieJar {
