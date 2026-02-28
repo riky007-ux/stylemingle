@@ -10,6 +10,7 @@ import { faceStyles } from "@/lib/avatar/registry/faces";
 import { hairStyles } from "@/lib/avatar/registry/hair";
 import { skinTones } from "@/lib/avatar/registry/skinTones";
 import { readEnhancedImageMap } from "@/lib/client/enhancedImageCache";
+import { isEnabled } from "@/lib/featureFlags";
 import { DEFAULT_AVATAR_PREFERENCES, HAIR_COLORS, type AvatarPreferences } from "@/lib/avatar/types";
 
 type OutfitPreviewItem = { id: string; imageUrl?: string; category?: string | null; primaryColor?: string | null };
@@ -26,9 +27,9 @@ type LatestOutfitPayload = {
 type FitAdjust = { scale: number; x: number; y: number };
 type FitMap = Record<"top" | "bottom" | "shoes", FitAdjust>;
 
-const AVATAR_V2_ENABLED = process.env.NEXT_PUBLIC_AVATAR_V2 === "1";
-const BG_REMOVAL_ENABLED = process.env.NEXT_PUBLIC_BG_REMOVAL === "1";
-const DEBUG_FLAGS_ENABLED = process.env.NEXT_PUBLIC_DEBUG_FLAGS === "1";
+const AVATAR_V2_ENABLED = isEnabled(process.env.NEXT_PUBLIC_AVATAR_V2);
+const BG_REMOVAL_ENABLED = isEnabled(process.env.NEXT_PUBLIC_BG_REMOVAL);
+const DEBUG_FLAGS_ENABLED = isEnabled(process.env.NEXT_PUBLIC_DEBUG_FLAGS);
 const FIT_KEY = "sm:avatarFitAdjust-v2";
 
 const DEFAULT_FIT: FitMap = {
@@ -120,10 +121,9 @@ export default function AvatarClient() {
   };
 
   const overlaySlots = useMemo(() => {
-    if (!latestOutfit || !AVATAR_V2_ENABLED) return [];
+    if (!AVATAR_V2_ENABLED) return [];
     return (["top", "bottom", "shoes"] as const)
-      .map((slot) => ({ slot, item: latestOutfit.items[slot] }))
-      .filter((entry) => entry.item?.imageUrl);
+      .map((slot) => ({ slot, item: latestOutfit?.items?.[slot] ?? null }));
   }, [latestOutfit]);
 
   return (
@@ -134,20 +134,21 @@ export default function AvatarClient() {
         <div className="bg-white rounded-2xl shadow-sm p-4 h-[500px] xl:col-span-1 relative overflow-hidden" data-testid={AVATAR_V2_ENABLED ? "avatar-v2-enabled" : "avatar-v1-enabled"}>
           {AVATAR_V2_ENABLED ? <AvatarV2SVG preferences={prefs} /> : <AvatarSVG preferences={prefs} />}
           {overlaySlots.map(({ slot, item }) => {
-            if (!item?.imageUrl) return null;
-            const src = enhancedMap[item.id] || item.imageUrl;
+            const src = item?.imageUrl ? (enhancedMap[item.id] || item.imageUrl) : null;
             const adjust = fit[slot];
             return (
               <div
-                key={item.id}
+                key={slot}
                 data-testid={`outfit-overlay-${slot}`}
                 className="absolute left-1/2 top-1/2 h-44 w-44 -translate-x-1/2 -translate-y-1/2"
                 style={{
                   transform: `translate(-50%, -50%) translate(${adjust.x}px, ${adjust.y}px) scale(${adjust.scale})`,
-                  filter: enhancedMap[item.id] ? "drop-shadow(0 4px 10px rgba(15,23,42,0.2))" : "drop-shadow(0 4px 12px rgba(15,23,42,0.18))",
+                  filter: item?.id && enhancedMap[item.id] ? "drop-shadow(0 4px 10px rgba(15,23,42,0.2))" : "drop-shadow(0 4px 12px rgba(15,23,42,0.18))",
                 }}
               >
-                <Image src={src} alt={`${slot} preview`} fill className={`object-contain ${enhancedMap[item.id] ? "" : "rounded-lg border border-white/70 bg-white/40 p-1"}`} unoptimized />
+                {src ? (
+                  <Image src={src} alt={`${slot} preview`} fill className={`object-contain ${item?.id && enhancedMap[item.id] ? "" : "rounded-lg border border-white/70 bg-white/40 p-1"}`} unoptimized />
+                ) : null}
               </div>
             );
           })}

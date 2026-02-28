@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { upload } from "@vercel/blob/client";
 import Image from "next/image";
 import { readEnhancedImageMap, setEnhancedImage } from "@/lib/client/enhancedImageCache";
+import { isEnabled } from "@/lib/featureFlags";
 
 type WardrobeItem = {
   id: string;
@@ -26,9 +27,9 @@ type UploadQueueItem = {
   itemId?: string;
 };
 
-const BG_REMOVAL_ENABLED = process.env.NEXT_PUBLIC_BG_REMOVAL === "1";
-const AVATAR_V2_ENABLED = process.env.NEXT_PUBLIC_AVATAR_V2 === "1";
-const DEBUG_FLAGS_ENABLED = process.env.NEXT_PUBLIC_DEBUG_FLAGS === "1";
+const BG_REMOVAL_ENABLED = isEnabled(process.env.NEXT_PUBLIC_BG_REMOVAL);
+const AVATAR_V2_ENABLED = isEnabled(process.env.NEXT_PUBLIC_AVATAR_V2);
+const DEBUG_FLAGS_ENABLED = isEnabled(process.env.NEXT_PUBLIC_DEBUG_FLAGS);
 
 const JPEG_QUALITY = 0.9;
 const UPLOAD_CONCURRENCY = 2;
@@ -572,14 +573,16 @@ export default function WardrobePage() {
         </button>
       </div>
 
-      {(queue.length > 0 || hasInflightQueue) && (
-        <div className="mt-4 rounded-xl border p-3 bg-zinc-50" data-testid="upload-queue-panel">
-          <div className="flex items-center justify-between gap-2">
-            <p className="text-sm font-medium">
-              {queueSummary.queued} queued • {queueSummary.uploading} uploading • {queueSummary.tagging} tagging • {queueSummary.failed} failed
-            </p>
-            <button type="button" onClick={cancelAll} className="text-xs rounded border px-2 py-1">Cancel All</button>
-          </div>
+      <div className="mt-4 rounded-xl border p-3 bg-zinc-50" data-testid="upload-queue-panel">
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-sm font-medium">
+            {queueSummary.queued} queued • {queueSummary.uploading} uploading • {queueSummary.tagging} tagging • {queueSummary.failed} failed
+          </p>
+          <button type="button" onClick={cancelAll} className="text-xs rounded border px-2 py-1" disabled={queue.length === 0 && !hasInflightQueue}>Cancel All</button>
+        </div>
+        {queue.length === 0 && !hasInflightQueue ? (
+          <p className="mt-3 text-xs text-zinc-500">No uploads in queue.</p>
+        ) : (
           <ul className="mt-3 space-y-2 max-h-64 overflow-auto">
             {queue.map((entry) => (
               <li key={entry.id} className="flex items-center gap-2 rounded border bg-white p-2 text-xs">
@@ -603,8 +606,8 @@ export default function WardrobePage() {
               </li>
             ))}
           </ul>
-        </div>
-      )}
+        )}
+      </div>
 
       {uploadNotice && <div className="mt-2 text-sm text-zinc-600">{uploadNotice}</div>}
       {bulkTagProgress && bulkTagging && <div className="mt-2 text-sm text-zinc-600">{bulkTagProgress}</div>}

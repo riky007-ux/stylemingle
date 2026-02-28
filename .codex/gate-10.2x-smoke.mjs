@@ -1,11 +1,21 @@
 #!/usr/bin/env node
 
-const BASE_URL = process.env.BASE_URL;
+const rawBaseUrl = process.env.BASE_URL;
 const SMOKE_EMAIL = process.env.SMOKE_EMAIL;
 const SMOKE_PASSWORD = process.env.SMOKE_PASSWORD;
 const VERCEL_PROTECTION_BYPASS = process.env.VERCEL_PROTECTION_BYPASS || process.env.VERCEL_AUTOMATION_BYPASS_SECRET || "";
 
 const nowUtc = new Date().toISOString();
+
+function normalizeBaseUrl(value) {
+  if (!value) return "";
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  if (/^https?:\/\//i.test(trimmed)) return trimmed.replace(/\/$/, "");
+  return `https://${trimmed}`.replace(/\/$/, "");
+}
+
+const BASE_URL = normalizeBaseUrl(rawBaseUrl);
 
 const TRANSIENT_STATUS = new Set([429, 502, 503, 504]);
 const MAX_RETRIES = 2;
@@ -143,6 +153,8 @@ async function request(path, { method = "GET", body, cookieJar, useCookies = fal
         json,
         text,
         headers: res.headers,
+        endpoint: `${method} ${path}`,
+        url: `${BASE_URL}${path}`,
       };
     } catch (error) {
       clearTimeout(timeout);
@@ -160,6 +172,8 @@ async function request(path, { method = "GET", body, cookieJar, useCookies = fal
         json: null,
         text: truncate(`network_error: ${String(error?.message || error)}`),
         headers: new Headers(),
+        endpoint: `${method} ${path}`,
+        url: `${BASE_URL}${path}`,
       };
     }
   }
@@ -170,6 +184,8 @@ async function request(path, { method = "GET", body, cookieJar, useCookies = fal
     json: null,
     text: "network_error: retry_exhausted",
     headers: new Headers(),
+    endpoint: `${method} ${path}`,
+    url: `${BASE_URL}${path}`,
   };
 }
 
@@ -179,17 +195,15 @@ const addResult = (area, ok, detail, extra = {}) => results.push({ area, ok, det
 (async () => {
   const authedJar = new CookieJar();
 
-  // A) Reachability
   const root = await request("/");
-  addResult("A) Reachability /", root.status === 200, `GET / -> ${root.status}`);
+  addResult("A) Reachability /", root.status === 200, `GET / -> ${root.status}`, { response: root.json ?? root.text, endpoint: root.endpoint, status: root.status, url: root.url });
 
   const loginPage = await request("/login");
-  addResult("A) Reachability /login", [200, 304].includes(loginPage.status), `GET /login -> ${loginPage.status}`);
+  addResult("A) Reachability /login", [200, 304].includes(loginPage.status), `GET /login -> ${loginPage.status}`, { response: loginPage.json ?? loginPage.text, endpoint: loginPage.endpoint, status: loginPage.status, url: loginPage.url });
 
   const signupPage = await request("/signup");
-  addResult("A) Reachability /signup", [200, 304].includes(signupPage.status), `GET /signup -> ${signupPage.status}`);
+  addResult("A) Reachability /signup", [200, 304].includes(signupPage.status), `GET /signup -> ${signupPage.status}`, { response: signupPage.json ?? signupPage.text, endpoint: signupPage.endpoint, status: signupPage.status, url: signupPage.url });
 
-  // B) Auth
   const login = await request("/api/auth/login", {
     method: "POST",
     body: { email: SMOKE_EMAIL, password: SMOKE_PASSWORD },
@@ -201,10 +215,9 @@ const addResult = (area, ok, detail, extra = {}) => results.push({ area, ok, det
     "B) Auth (login + cookie)",
     login.status === 200 && loginHasCookie,
     `POST /api/auth/login -> ${login.status}; cookie=${loginHasCookie ? "present" : "missing"}`,
-    { response: login.json ?? login.text }
+    { response: login.json ?? login.text, endpoint: login.endpoint, status: login.status, url: login.url }
   );
 
-  // C) Unauth guard
   const unauthCalls = [
     { name: "items", path: "/api/wardrobe/items", method: "GET" },
     { name: "tag", path: "/api/ai/wardrobe/tag", method: "POST", body: { itemId: "00000000-0000-0000-0000-000000000000" } },
@@ -215,10 +228,9 @@ const addResult = (area, ok, detail, extra = {}) => results.push({ area, ok, det
   for (const c of unauthCalls) {
     const r = await request(c.path, { method: c.method, body: c.body });
     const ok = r.status === 401 || r.status === 403;
-    addResult(`C) Unauth guard ${c.name}`, ok, `${c.method} ${c.path} -> ${r.status}`, { response: r.json ?? r.text });
+    addResult(`C) Unauth guard ${c.name}`, ok, `${c.method} ${c.path} -> ${r.status}`, { response: r.json ?? r.text, endpoint: r.endpoint, status: r.status, url: r.url });
   }
 
-  // D) Wardrobe items list
   const itemsRes = await request("/api/wardrobe/items", { method: "GET", cookieJar: authedJar, useCookies: true });
   const items = Array.isArray(itemsRes.json) ? itemsRes.json : [];
   const itemIds = items.map((it) => it?.id).filter((id) => typeof id === "string");
@@ -233,24 +245,19 @@ const addResult = (area, ok, detail, extra = {}) => results.push({ area, ok, det
     hasItems,
     `GET /api/wardrobe/items -> ${itemsRes.status}; count=${itemIds.length}`,
     {
-      response:
-        hasItems
-          ? undefined
-          : itemsRes.json ?? itemsRes.text ?? "Smoke account has no wardrobe items; add at least 3 (top/bottom/shoes) and re-run.",
+      response: hasItems ? undefined : itemsRes.json ?? itemsRes.text ?? "Smoke account has no wardrobe items; add at least 3 (top/bottom/shoes) and re-run.",
+      endpoint: itemsRes.endpoint,
+      status: itemsRes.status,
+      url: itemsRes.url,
     }
   );
 
   if (!hasItems) {
-    addResult(
-      "D) Wardrobe readiness",
-      false,
-      "Smoke account has no wardrobe items; add at least 3 (top/bottom/shoes) and re-run."
-    );
+    addResult("D) Wardrobe readiness", false, "Smoke account has no wardrobe items; add at least 3 (top/bottom/shoes) and re-run.");
   }
 
-  // E) Tag-batch
   const tagBatchIds = (missingMeta.length > 0 ? missingMeta : itemIds).slice(0, 6);
-  let tagBatchRes = { status: 0, json: null, text: "skipped" };
+  let tagBatchRes = { status: 0, json: null, text: "skipped", endpoint: "POST /api/ai/wardrobe/tag-batch", url: `${BASE_URL}/api/ai/wardrobe/tag-batch` };
   if (login.status === 200 && tagBatchIds.length > 0) {
     tagBatchRes = await request("/api/ai/wardrobe/tag-batch", {
       method: "POST",
@@ -268,12 +275,11 @@ const addResult = (area, ok, detail, extra = {}) => results.push({ area, ok, det
     "E) Tag-batch",
     tagBatchOk,
     `POST /api/ai/wardrobe/tag-batch -> ${tagBatchRes.status}${tagBatchCode ? ` (${tagBatchCode})` : ""}`,
-    { response: tagBatchRes.json ?? tagBatchRes.text }
+    { response: tagBatchRes.json ?? tagBatchRes.text, endpoint: tagBatchRes.endpoint, status: tagBatchRes.status, url: tagBatchRes.url }
   );
 
-  // F) Single tag
   const singleTagId = tagBatchIds[0] || itemIds[0];
-  let tagRes = { status: 0, json: null, text: "skipped" };
+  let tagRes = { status: 0, json: null, text: "skipped", endpoint: "POST /api/ai/wardrobe/tag", url: `${BASE_URL}/api/ai/wardrobe/tag` };
   if (login.status === 200 && singleTagId) {
     tagRes = await request("/api/ai/wardrobe/tag", {
       method: "POST",
@@ -290,11 +296,10 @@ const addResult = (area, ok, detail, extra = {}) => results.push({ area, ok, det
     "F) Single tag",
     tagOk,
     `POST /api/ai/wardrobe/tag -> ${tagRes.status}${tagCode ? ` (${tagCode})` : ""}`,
-    { response: tagRes.json ?? tagRes.text }
+    { response: tagRes.json ?? tagRes.text, endpoint: tagRes.endpoint, status: tagRes.status, url: tagRes.url }
   );
 
-  // G) Outfit
-  let outfitRes = { status: 0, json: null, text: "skipped" };
+  let outfitRes = { status: 0, json: null, text: "skipped", endpoint: "POST /api/ai/outfit", url: `${BASE_URL}/api/ai/outfit` };
   if (login.status === 200) {
     outfitRes = await request("/api/ai/outfit", {
       method: "POST",
@@ -319,7 +324,7 @@ const addResult = (area, ok, detail, extra = {}) => results.push({ area, ok, det
     "G) Outfit",
     outfitOk,
     `POST /api/ai/outfit -> ${outfitRes.status}${outfitRes.json?.code ? ` (${outfitRes.json.code})` : ""}`,
-    { response: outfitRes.json ?? outfitRes.text }
+    { response: outfitRes.json ?? outfitRes.text, endpoint: outfitRes.endpoint, status: outfitRes.status, url: outfitRes.url }
   );
 
   const passCount = results.filter((r) => r.ok).length;
@@ -343,17 +348,20 @@ const addResult = (area, ok, detail, extra = {}) => results.push({ area, ok, det
   if (failures.length > 0) {
     console.log("\nFailing endpoint details (truncated):");
     for (const f of failures) {
-      if (f.response !== undefined) {
-        const rendered = truncate(f.response);
-        console.log(`- ${f.area}: ${rendered}`);
-        const lowered = String(rendered).toLowerCase();
-        if (lowered.includes("insufficient_quota") || lowered.includes("you exceeded your current quota")) {
-          console.log("  hint: OpenAI quota/credits issue (API billing), not app logic.");
-        }
-      } else {
-        console.log(`- ${f.area}`);
+      const responseText = f.response !== undefined ? truncate(f.response) : "<none>";
+      const endpoint = f.endpoint || "unknown endpoint";
+      const status = f.status ?? "unknown";
+      const url = f.url || "unknown url";
+      console.log(`- ${f.area}: endpoint=${endpoint}; status=${status}; url=${url}; body=${responseText}`);
+      const lowered = String(responseText).toLowerCase();
+      if (lowered.includes("insufficient_quota") || lowered.includes("you exceeded your current quota")) {
+        console.log("  hint: OpenAI quota/credits issue (API billing), not app logic.");
       }
     }
+
+    const first = failures[0];
+    const firstReason = first.response !== undefined ? truncate(first.response, 200) : first.detail;
+    console.log(`\nROOT_CAUSE: ${first.area} failed (${first.detail}). endpoint=${first.endpoint || "unknown"}; status=${first.status ?? "unknown"}; reason=${firstReason}`);
   }
 
   process.exit(failCount === 0 ? 0 : 1);
