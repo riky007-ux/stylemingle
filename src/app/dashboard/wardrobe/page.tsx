@@ -27,13 +27,15 @@ type UploadQueueItem = {
 };
 
 const BG_REMOVAL_ENABLED = process.env.NEXT_PUBLIC_BG_REMOVAL === "1";
+const AVATAR_V2_ENABLED = process.env.NEXT_PUBLIC_AVATAR_V2 === "1";
+const DEBUG_FLAGS_ENABLED = process.env.NEXT_PUBLIC_DEBUG_FLAGS === "1";
+
+const JPEG_QUALITY = 0.9;
+const UPLOAD_CONCURRENCY = 2;
 
 function safeUUID() {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
-
-const JPEG_QUALITY = 0.9;
-const UPLOAD_CONCURRENCY = 2;
 
 function getFileExtension(fileName: string) {
   const parts = fileName.split(".");
@@ -66,7 +68,6 @@ function isPngOrWebp(file: File) {
 
 async function canvasConvertToJpeg(file: File) {
   const objectUrl = URL.createObjectURL(file);
-
   try {
     const image = await new Promise<HTMLImageElement>((resolve, reject) => {
       const img = document.createElement("img");
@@ -78,18 +79,14 @@ async function canvasConvertToJpeg(file: File) {
     const width = image.naturalWidth || image.width;
     const height = image.naturalHeight || image.height;
 
-    if (!width || !height) {
-      throw new Error("Image dimensions are invalid for conversion.");
-    }
+    if (!width || !height) throw new Error("Image dimensions are invalid for conversion.");
 
     const canvas = document.createElement("canvas");
     canvas.width = width;
     canvas.height = height;
 
     const ctx = canvas.getContext("2d");
-    if (!ctx) {
-      throw new Error("Failed to create drawing context.");
-    }
+    if (!ctx) throw new Error("Failed to create drawing context.");
 
     ctx.fillStyle = "#ffffff";
     ctx.fillRect(0, 0, width, height);
@@ -161,6 +158,7 @@ function WardrobeItemCard({
   onDelete,
   onSaveDetails,
   onRetag,
+  onEnhance,
   isTagging,
 }: {
   item: WardrobeItem;
@@ -168,10 +166,12 @@ function WardrobeItemCard({
   onDelete: (id: string) => Promise<void>;
   onSaveDetails: (id: string, updates: Partial<WardrobeItem>) => Promise<void>;
   onRetag: (id: string) => Promise<void>;
+  onEnhance?: (item: WardrobeItem) => Promise<void>;
   isTagging: boolean;
 }) {
   const [deleting, setDeleting] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [enhancing, setEnhancing] = useState(false);
   const [category, setCategory] = useState(item.category || "");
   const [primaryColor, setPrimaryColor] = useState(item.primaryColor || "");
   const [styleTag, setStyleTag] = useState(item.styleTag || "");
@@ -205,9 +205,28 @@ function WardrobeItemCard({
         <div className="capitalize">{item.primaryColor || "unknown"}</div>
         <div className="capitalize">{item.styleTag || "unknown"}</div>
       </div>
-      <button type="button" className="absolute right-2 bottom-2 rounded bg-white/90 px-2 py-1 text-[11px]" onClick={() => onRetag(item.id)} disabled={isTagging}>
-        Re-tag
-      </button>
+      <div className="absolute left-2 bottom-2 flex gap-1">
+        <button type="button" className="rounded bg-white/90 px-2 py-1 text-[11px]" onClick={() => onRetag(item.id)} disabled={isTagging}>
+          Re-tag
+        </button>
+        {onEnhance && (
+          <button
+            type="button"
+            className="rounded bg-white/90 px-2 py-1 text-[11px]"
+            disabled={enhancing}
+            onClick={async () => {
+              setEnhancing(true);
+              try {
+                await onEnhance(item);
+              } finally {
+                setEnhancing(false);
+              }
+            }}
+          >
+            {enhancing ? "Enhancing…" : "Enhance"}
+          </button>
+        )}
+      </div>
 
       {editing && (
         <div className="absolute inset-0 bg-white/95 p-2 text-xs">
@@ -221,11 +240,30 @@ function WardrobeItemCard({
           </select>
           <input className="w-full border rounded p-1 mb-1" placeholder="Primary color" value={primaryColor} onChange={(e) => setPrimaryColor(e.target.value)} />
           <input className="w-full border rounded p-1 mb-2" placeholder="Style tag (optional)" value={styleTag} onChange={(e) => setStyleTag(e.target.value)} />
-          <button className="w-full rounded bg-slate-900 text-white py-1" onClick={async () => {
-            await onSaveDetails(item.id, { category: (category as any) || null, primaryColor: primaryColor || null, styleTag: styleTag || null });
-            setEditing(false);
-          }}>Save details</button>
+          <button
+            className="w-full rounded bg-slate-900 text-white py-1"
+            onClick={async () => {
+              await onSaveDetails(item.id, { category: (category as any) || null, primaryColor: primaryColor || null, styleTag: styleTag || null });
+              setEditing(false);
+            }}
+          >
+            Save details
+          </button>
         </div>
+      )}
+    </div>
+  );
+}
+
+function ExperimentalIndicator() {
+  if (!DEBUG_FLAGS_ENABLED) return null;
+  return (
+    <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
+      <p className="font-semibold">Experimental features</p>
+      <p>BG Removal: <span className="font-semibold">{BG_REMOVAL_ENABLED ? "ON" : "OFF"}</span></p>
+      <p>Avatar v2: <span className="font-semibold">{AVATAR_V2_ENABLED ? "ON" : "OFF"}</span></p>
+      {(!BG_REMOVAL_ENABLED || !AVATAR_V2_ENABLED) && (
+        <p className="mt-1">Enable in Vercel Preview env vars and redeploy: NEXT_PUBLIC_BG_REMOVAL=1, NEXT_PUBLIC_AVATAR_V2=1</p>
       )}
     </div>
   );
@@ -233,6 +271,7 @@ function WardrobeItemCard({
 
 export default function WardrobePage() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const cameraInputRef = useRef<HTMLInputElement | null>(null);
   const activeWorkersRef = useRef(0);
   const cancelQueuedRef = useRef(false);
 
@@ -263,10 +302,10 @@ export default function WardrobePage() {
   }
 
   useEffect(() => {
-    loadItems();
+    void loadItems();
   }, []);
 
-  const runAutoTag = async (itemId: string, force = false) => {
+  const runAutoTag = useCallback(async (itemId: string, force = false) => {
     setTaggingItemIds((prev) => (prev.includes(itemId) ? prev : [...prev, itemId]));
     try {
       const res = await fetch("/api/ai/wardrobe/tag", {
@@ -284,7 +323,7 @@ export default function WardrobePage() {
     } finally {
       setTaggingItemIds((prev) => prev.filter((id) => id !== itemId));
     }
-  };
+  }, []);
 
   const handleSaveDetails = async (id: string, updates: Partial<WardrobeItem>) => {
     const res = await fetch(`/api/wardrobe/items/${id}`, {
@@ -300,6 +339,24 @@ export default function WardrobePage() {
 
   const updateQueueStatus = useCallback((id: string, status: QueueStatus, extra?: Partial<UploadQueueItem>) => {
     setQueue((prev) => prev.map((entry) => (entry.id === id ? { ...entry, status, ...extra } : entry)));
+  }, []);
+
+  const enhanceExistingItem = useCallback(async (item: WardrobeItem) => {
+    if (!BG_REMOVAL_ENABLED) return;
+
+    try {
+      const response = await fetch(item.imageUrl);
+      const blob = await response.blob();
+      const inputFile = new File([blob], `enhance-${item.id}.png`, { type: blob.type || "image/png" });
+      const remover = await import("@/lib/client/removeBackground");
+      const enhanced = await remover.removeBackgroundClientSide(inputFile);
+      setEnhancedImage(item.id, enhanced.previewUrl);
+      setEnhancedMap((prev) => ({ ...prev, [item.id]: enhanced.previewUrl }));
+      setUploadNotice("Enhanced preview ready.");
+    } catch (err) {
+      console.error(err);
+      setUploadNotice("Enhancement failed. Keeping original photo.");
+    }
   }, []);
 
   const processQueueItem = useCallback(async (entry: UploadQueueItem) => {
@@ -368,7 +425,7 @@ export default function WardrobePage() {
   }, [enhancePhoto, runAutoTag, updateQueueStatus]);
 
   useEffect(() => {
-    const launchWorkers = async () => {
+    const launchWorkers = () => {
       if (cancelQueuedRef.current) return;
 
       const waiting = queue.filter((q) => q.status === "queued");
@@ -383,19 +440,21 @@ export default function WardrobePage() {
       });
     };
 
-    void launchWorkers();
+    launchWorkers();
   }, [processQueueItem, queue]);
 
   const queueSummary = useMemo(() => {
-    const total = queue.length;
-    const uploaded = queue.filter((q) => ["saving", "tagging", "done", "failed"].includes(q.status)).length;
-    const tagged = queue.filter((q) => ["done", "failed"].includes(q.status)).length;
-    return {
-      total,
-      uploaded,
-      tagged,
+    const summary = {
+      queued: queue.filter((q) => q.status === "queued").length,
+      uploading: queue.filter((q) => q.status === "uploading" || q.status === "normalizing" || q.status === "saving").length,
+      tagging: queue.filter((q) => q.status === "tagging").length,
+      failed: queue.filter((q) => q.status === "failed").length,
+      total: queue.length,
     };
+    return summary;
   }, [queue]);
+
+  const hasInflightQueue = useMemo(() => queue.some((q) => ["queued", "normalizing", "uploading", "saving", "tagging"].includes(q.status)), [queue]);
 
   const handleAutoTagCloset = async () => {
     setBulkTagging(true);
@@ -437,7 +496,7 @@ export default function WardrobePage() {
     }
   };
 
-  const enqueueFiles = (files: FileList | null) => {
+  const enqueueFiles = (files: FileList | null, source: "library" | "camera") => {
     if (!files || files.length === 0) return;
     cancelQueuedRef.current = false;
     const incoming: UploadQueueItem[] = Array.from(files).map((file) => ({
@@ -447,36 +506,70 @@ export default function WardrobePage() {
       status: "queued",
     }));
     setQueue((prev) => [...incoming, ...prev]);
-    if (fileInputRef.current) fileInputRef.current.value = "";
+    if (source === "library" && fileInputRef.current) fileInputRef.current.value = "";
+    if (source === "camera" && cameraInputRef.current) cameraInputRef.current.value = "";
   };
 
   const cancelAll = () => {
     cancelQueuedRef.current = true;
-    setQueue((prev) => prev.map((entry) => (entry.status === "queued" ? { ...entry, status: "cancelled" } : entry)));
+    setQueue((prev) => prev.map((entry) => {
+      if (["queued", "normalizing", "uploading", "saving", "tagging"].includes(entry.status)) {
+        return { ...entry, status: "cancelled", error: "Cancelled" };
+      }
+      return entry;
+    }));
   };
 
   return (
     <div className="p-6 max-w-5xl mx-auto">
       <h1 className="text-2xl font-semibold mb-4">Wardrobe</h1>
+      <ExperimentalIndicator />
       <p className="mb-4 text-sm text-zinc-600">Upload outfit pieces and manage your wardrobe.</p>
 
-      <input ref={fileInputRef} type="file" accept="image/*" multiple onChange={(e) => enqueueFiles(e.target.files)} />
-      {BG_REMOVAL_ENABLED && (
-        <label className="ml-3 text-sm inline-flex items-center gap-2">
-          <input type="checkbox" checked={enhancePhoto} onChange={(e) => setEnhancePhoto(e.target.checked)} />
-          Enhance photo (remove background)
+      <div className="flex flex-wrap items-center gap-3">
+        <label className="rounded border border-zinc-300 px-3 py-1.5 text-sm cursor-pointer bg-white">
+          Select from library
+          <input
+            ref={fileInputRef}
+            className="hidden"
+            type="file"
+            accept="image/*"
+            multiple
+            onChange={(e) => enqueueFiles(e.target.files, "library")}
+          />
         </label>
-      )}
 
-      <button type="button" onClick={handleAutoTagCloset} disabled={bulkTagging || items.length === 0} className="ml-3 rounded border border-zinc-300 px-3 py-1 text-sm disabled:opacity-50">
-        {bulkTagging ? (bulkTagProgress || "Auto-tagging…") : "Auto-tag my closet"}
-      </button>
+        <label className="rounded border border-zinc-300 px-3 py-1.5 text-sm cursor-pointer bg-white">
+          Take Photos
+          <input
+            ref={cameraInputRef}
+            className="hidden"
+            type="file"
+            accept="image/*"
+            capture="environment"
+            onChange={(e) => enqueueFiles(e.target.files, "camera")}
+          />
+        </label>
 
-      {queue.length > 0 && (
+        {BG_REMOVAL_ENABLED && (
+          <label className="text-sm inline-flex items-center gap-2">
+            <input type="checkbox" checked={enhancePhoto} onChange={(e) => setEnhancePhoto(e.target.checked)} />
+            Enhance photo (remove background)
+          </label>
+        )}
+
+        <button type="button" onClick={handleAutoTagCloset} disabled={bulkTagging || items.length === 0} className="rounded border border-zinc-300 px-3 py-1 text-sm disabled:opacity-50">
+          {bulkTagging ? (bulkTagProgress || "Auto-tagging…") : "Auto-tag my closet"}
+        </button>
+      </div>
+
+      {(queue.length > 0 || hasInflightQueue) && (
         <div className="mt-4 rounded-xl border p-3 bg-zinc-50">
-          <div className="flex items-center justify-between">
-            <p className="text-sm font-medium">Uploading {queueSummary.uploaded}/{queueSummary.total} · Tagging {queueSummary.tagged}/{queueSummary.total}</p>
-            <button type="button" onClick={cancelAll} className="text-xs rounded border px-2 py-1">Abort / Cancel All</button>
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-sm font-medium">
+              {queueSummary.queued} queued • {queueSummary.uploading} uploading • {queueSummary.tagging} tagging • {queueSummary.failed} failed
+            </p>
+            <button type="button" onClick={cancelAll} className="text-xs rounded border px-2 py-1">Cancel All</button>
           </div>
           <ul className="mt-3 space-y-2 max-h-64 overflow-auto">
             {queue.map((entry) => (
@@ -505,6 +598,7 @@ export default function WardrobePage() {
       )}
 
       {uploadNotice && <div className="mt-2 text-sm text-zinc-600">{uploadNotice}</div>}
+      {bulkTagProgress && bulkTagging && <div className="mt-2 text-sm text-zinc-600">{bulkTagProgress}</div>}
       {error && <div className="mt-2 text-sm text-red-600">{error}</div>}
 
       <div className="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
@@ -525,6 +619,7 @@ export default function WardrobePage() {
             onRetag={async (id) => {
               await runAutoTag(id, true);
             }}
+            onEnhance={BG_REMOVAL_ENABLED ? enhanceExistingItem : undefined}
             isTagging={taggingItemIds.includes(item.id)}
           />
         ))}

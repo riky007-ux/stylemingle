@@ -27,6 +27,8 @@ type FitAdjust = { scale: number; x: number; y: number };
 type FitMap = Record<"top" | "bottom" | "shoes", FitAdjust>;
 
 const AVATAR_V2_ENABLED = process.env.NEXT_PUBLIC_AVATAR_V2 === "1";
+const BG_REMOVAL_ENABLED = process.env.NEXT_PUBLIC_BG_REMOVAL === "1";
+const DEBUG_FLAGS_ENABLED = process.env.NEXT_PUBLIC_DEBUG_FLAGS === "1";
 const FIT_KEY = "sm:avatarFitAdjust-v2";
 
 const DEFAULT_FIT: FitMap = {
@@ -34,6 +36,20 @@ const DEFAULT_FIT: FitMap = {
   bottom: { scale: 1, x: 0, y: 68 },
   shoes: { scale: 0.9, x: 0, y: 150 },
 };
+
+function ExperimentalIndicator() {
+  if (!DEBUG_FLAGS_ENABLED) return null;
+  return (
+    <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
+      <p className="font-semibold">Experimental features</p>
+      <p>BG Removal: <span className="font-semibold">{BG_REMOVAL_ENABLED ? "ON" : "OFF"}</span></p>
+      <p>Avatar v2: <span className="font-semibold">{AVATAR_V2_ENABLED ? "ON" : "OFF"}</span></p>
+      {(!BG_REMOVAL_ENABLED || !AVATAR_V2_ENABLED) && (
+        <p className="mt-1">Enable in Vercel Preview env vars and redeploy: NEXT_PUBLIC_BG_REMOVAL=1, NEXT_PUBLIC_AVATAR_V2=1</p>
+      )}
+    </div>
+  );
+}
 
 export default function AvatarClient() {
   const searchParams = useSearchParams();
@@ -112,8 +128,9 @@ export default function AvatarClient() {
   return (
     <div className="min-h-screen bg-slate-50 p-4 md:p-8">
       <h1 className="text-3xl font-semibold mb-4">Avatar Builder</h1>
+      <ExperimentalIndicator />
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-        <div className="bg-white rounded-2xl shadow-sm p-4 h-[500px] xl:col-span-1 relative overflow-hidden">
+        <div className="bg-white rounded-2xl shadow-sm p-4 h-[500px] xl:col-span-1 relative overflow-hidden" data-testid={AVATAR_V2_ENABLED ? "avatar-v2-enabled" : "avatar-v1-enabled"}>
           {AVATAR_V2_ENABLED ? <AvatarV2SVG preferences={prefs} /> : <AvatarSVG preferences={prefs} />}
           {overlaySlots.map(({ slot, item }) => {
             if (!item?.imageUrl) return null;
@@ -122,6 +139,7 @@ export default function AvatarClient() {
             return (
               <div
                 key={item.id}
+                data-testid={`outfit-overlay-${slot}`}
                 className="absolute left-1/2 top-1/2 h-44 w-44 -translate-x-1/2 -translate-y-1/2"
                 style={{
                   transform: `translate(-50%, -50%) translate(${adjust.x}px, ${adjust.y}px) scale(${adjust.scale})`,
@@ -194,8 +212,9 @@ export default function AvatarClient() {
           </div>
 
           {AVATAR_V2_ENABLED && (
-            <details className="rounded-lg border p-3">
+            <details className="rounded-lg border p-3" open data-testid="avatar-fit-controls">
               <summary className="cursor-pointer text-sm font-medium">Adjust fit</summary>
+              <p className="mt-2 text-xs text-zinc-500">Best results with BG removal enabled.</p>
               <div className="mt-3 space-y-3">
                 {(["top", "bottom", "shoes"] as const).map((slot) => (
                   <div key={slot} className="rounded border p-2 text-xs">
