@@ -1,2 +1,5 @@
 node_modules/
 .next/
+
+# Gate 11 CI output artifacts (generated)
+.codex/artifacts/gate-11/*.txt
