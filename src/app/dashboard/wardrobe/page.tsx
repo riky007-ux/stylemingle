@@ -255,8 +255,8 @@ function WardrobeItemCard({
   );
 }
 
-function ExperimentalIndicator() {
-  if (!DEBUG_FLAGS_ENABLED) return null;
+function ExperimentalIndicator({ visible }: { visible: boolean }) {
+  if (!visible) return null;
   return (
     <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
       <p className="font-semibold">Experimental features</p>
@@ -284,6 +284,7 @@ export default function WardrobePage() {
   const [queue, setQueue] = useState<UploadQueueItem[]>([]);
   const [enhancePhoto, setEnhancePhoto] = useState(BG_REMOVAL_ENABLED);
   const [enhancedMap, setEnhancedMap] = useState<Record<string, string>>({});
+  const [queryDebugEnabled, setQueryDebugEnabled] = useState(false);
 
   useEffect(() => {
     setEnhancedMap(readEnhancedImageMap());
@@ -303,6 +304,12 @@ export default function WardrobePage() {
 
   useEffect(() => {
     void loadItems();
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    setQueryDebugEnabled(params.get("debug") === "1");
   }, []);
 
   const runAutoTag = useCallback(async (itemId: string, force = false) => {
@@ -523,7 +530,7 @@ export default function WardrobePage() {
   return (
     <div className="p-6 max-w-5xl mx-auto">
       <h1 className="text-2xl font-semibold mb-4">Wardrobe</h1>
-      <ExperimentalIndicator />
+      <ExperimentalIndicator visible={DEBUG_FLAGS_ENABLED || queryDebugEnabled} />
       <p className="mb-4 text-sm text-zinc-600">Upload outfit pieces and manage your wardrobe.</p>
 
       <div className="flex flex-wrap items-center gap-3">
@@ -535,6 +542,7 @@ export default function WardrobePage() {
             type="file"
             accept="image/*"
             multiple
+            data-testid="wardrobe-upload-multi"
             onChange={(e) => enqueueFiles(e.target.files, "library")}
           />
         </label>
@@ -547,6 +555,7 @@ export default function WardrobePage() {
             type="file"
             accept="image/*"
             capture="environment"
+            data-testid="wardrobe-upload-camera"
             onChange={(e) => enqueueFiles(e.target.files, "camera")}
           />
         </label>
@@ -564,7 +573,7 @@ export default function WardrobePage() {
       </div>
 
       {(queue.length > 0 || hasInflightQueue) && (
-        <div className="mt-4 rounded-xl border p-3 bg-zinc-50">
+        <div className="mt-4 rounded-xl border p-3 bg-zinc-50" data-testid="upload-queue-panel">
           <div className="flex items-center justify-between gap-2">
             <p className="text-sm font-medium">
               {queueSummary.queued} queued • {queueSummary.uploading} uploading • {queueSummary.tagging} tagging • {queueSummary.failed} failed

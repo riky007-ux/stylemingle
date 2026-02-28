@@ -37,8 +37,8 @@ const DEFAULT_FIT: FitMap = {
   shoes: { scale: 0.9, x: 0, y: 150 },
 };
 
-function ExperimentalIndicator() {
-  if (!DEBUG_FLAGS_ENABLED) return null;
+function ExperimentalIndicator({ visible }: { visible: boolean }) {
+  if (!visible) return null;
   return (
     <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
       <p className="font-semibold">Experimental features</p>
@@ -59,6 +59,7 @@ export default function AvatarClient() {
   const [fit, setFit] = useState<FitMap>(DEFAULT_FIT);
   const [enhancedMap, setEnhancedMap] = useState<Record<string, string>>({});
   const outfitParam = searchParams?.get("outfit") ?? null;
+  const queryDebugEnabled = searchParams?.get("debug") === "1";
 
   useEffect(() => {
     fetch("/api/avatar/preferences").then(async (res) => {
@@ -128,7 +129,7 @@ export default function AvatarClient() {
   return (
     <div className="min-h-screen bg-slate-50 p-4 md:p-8">
       <h1 className="text-3xl font-semibold mb-4">Avatar Builder</h1>
-      <ExperimentalIndicator />
+      <ExperimentalIndicator visible={DEBUG_FLAGS_ENABLED || queryDebugEnabled} />
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         <div className="bg-white rounded-2xl shadow-sm p-4 h-[500px] xl:col-span-1 relative overflow-hidden" data-testid={AVATAR_V2_ENABLED ? "avatar-v2-enabled" : "avatar-v1-enabled"}>
           {AVATAR_V2_ENABLED ? <AvatarV2SVG preferences={prefs} /> : <AvatarSVG preferences={prefs} />}
