@@ -3,7 +3,7 @@
 const BASE_URL = process.env.BASE_URL;
 const SMOKE_EMAIL = process.env.SMOKE_EMAIL;
 const SMOKE_PASSWORD = process.env.SMOKE_PASSWORD;
-const VERCEL_PROTECTION_BYPASS = process.env.VERCEL_PROTECTION_BYPASS;
+const PROTECTION_BYPASS = process.env.VERCEL_PROTECTION_BYPASS || process.env.VERCEL_AUTOMATION_BYPASS_SECRET || "";
 
 if (!BASE_URL) {
   console.error('Missing required env var: BASE_URL');
@@ -16,6 +16,11 @@ if (!SMOKE_EMAIL || !SMOKE_PASSWORD) {
   console.error('Usage: BASE_URL="https://..." SMOKE_EMAIL="..." SMOKE_PASSWORD="..." node .codex/gate-11-proof.mjs');
   process.exit(2);
 }
+
+const TRANSIENT_STATUS = new Set([429, 502, 503, 504]);
+const MAX_RETRIES = 2;
+const RETRY_BASE_MS = 450;
+const REQUEST_TIMEOUT_MS = 15_000;
 
 class CookieJar {
   constructor() { this.cookies = new Map(); }
@@ -43,35 +48,64 @@ function getCode(body) {
   return body.code || body.error;
 }
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 async function req(path, { method = 'GET', body, jar, auth = false, acceptHtml = false } = {}) {
   const headers = { accept: acceptHtml ? 'text/html,application/json' : 'application/json' };
   if (body !== undefined) headers['content-type'] = 'application/json';
-  if (VERCEL_PROTECTION_BYPASS) headers['x-vercel-protection-bypass'] = VERCEL_PROTECTION_BYPASS;
+  if (PROTECTION_BYPASS) {
+    headers['x-vercel-protection-bypass'] = PROTECTION_BYPASS;
+    headers['x-vercel-set-bypass-cookie'] = 'true';
+  }
   if (auth && jar?.hasAny()) headers.cookie = jar.header();
 
-  try {
-    const res = await fetch(`${BASE_URL}${path}`, {
-      method,
-      headers,
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-      redirect: 'manual',
-    });
-    jar?.absorb(res.headers);
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt += 1) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
-    const ct = res.headers.get('content-type') || '';
-    let text = '';
-    let json = null;
-    if (ct.includes('application/json')) {
-      try { json = await res.json(); } catch { text = await res.text(); }
-    } else {
-      text = await res.text();
-      try { json = JSON.parse(text); } catch {}
+    try {
+      const res = await fetch(`${BASE_URL}${path}`, {
+        method,
+        headers,
+        body: body !== undefined ? JSON.stringify(body) : undefined,
+        redirect: 'manual',
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+      jar?.absorb(res.headers);
+
+      if (TRANSIENT_STATUS.has(res.status) && attempt < MAX_RETRIES) {
+        const waitMs = RETRY_BASE_MS * 2 ** attempt;
+        console.log(`retrying ${method} ${path} after transient status ${res.status} (attempt ${attempt + 1}/${MAX_RETRIES})`);
+        await sleep(waitMs);
+        continue;
+      }
+
+      const ct = res.headers.get('content-type') || '';
+      let text = '';
+      let json = null;
+      if (ct.includes('application/json')) {
+        try { json = await res.json(); } catch { text = await res.text(); }
+      } else {
+        text = await res.text();
+        try { json = JSON.parse(text); } catch {}
+      }
+
+      return { status: res.status, ok: res.ok, text, json };
+    } catch (error) {
+      clearTimeout(timeout);
+      const isNetworkish = error?.name === 'AbortError' || String(error?.message || error).toLowerCase().includes('fetch');
+      if (isNetworkish && attempt < MAX_RETRIES) {
+        const waitMs = RETRY_BASE_MS * 2 ** attempt;
+        console.log(`retrying ${method} ${path} after network/timeout error (attempt ${attempt + 1}/${MAX_RETRIES})`);
+        await sleep(waitMs);
+        continue;
+      }
+      return { status: 0, ok: false, text: `network_error: ${String(error?.message || error)}`, json: null };
     }
-
-    return { status: res.status, ok: res.ok, text, json };
-  } catch (error) {
-    return { status: 0, ok: false, text: `network_error: ${String(error?.message || error)}`, json: null };
   }
+
+  return { status: 0, ok: false, text: 'network_error: retry_exhausted', json: null };
 }
 
 const checks = [];

@@ -3,9 +3,15 @@
 const BASE_URL = process.env.BASE_URL;
 const SMOKE_EMAIL = process.env.SMOKE_EMAIL;
 const SMOKE_PASSWORD = process.env.SMOKE_PASSWORD;
-const VERCEL_PROTECTION_BYPASS = process.env.VERCEL_PROTECTION_BYPASS;
+const VERCEL_PROTECTION_BYPASS = process.env.VERCEL_PROTECTION_BYPASS || process.env.VERCEL_AUTOMATION_BYPASS_SECRET || "";
 
 const nowUtc = new Date().toISOString();
+
+const TRANSIENT_STATUS = new Set([429, 502, 503, 504]);
+const MAX_RETRIES = 2;
+const RETRY_BASE_MS = 450;
+const REQUEST_TIMEOUT_MS = 15_000;
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function printUsage() {
   console.error("Usage:");
@@ -84,6 +90,7 @@ async function request(path, { method = "GET", body, cookieJar, useCookies = fal
 
   if (VERCEL_PROTECTION_BYPASS) {
     headers["x-vercel-protection-bypass"] = VERCEL_PROTECTION_BYPASS;
+    headers["x-vercel-set-bypass-cookie"] = "true";
   }
 
   if (useCookies && cookieJar) {
@@ -91,48 +98,79 @@ async function request(path, { method = "GET", body, cookieJar, useCookies = fal
     if (cookieHeader) headers.cookie = cookieHeader;
   }
 
-  try {
-    const res = await fetch(`${BASE_URL}${path}`, {
-      method,
-      headers,
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-      redirect: "manual",
-    });
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt += 1) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
-    if (cookieJar) cookieJar.absorb(res.headers);
+    try {
+      const res = await fetch(`${BASE_URL}${path}`, {
+        method,
+        headers,
+        body: body !== undefined ? JSON.stringify(body) : undefined,
+        redirect: "manual",
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
 
-    let json;
-    let text;
-    const contentType = res.headers.get("content-type") || "";
-    if (contentType.includes("application/json")) {
-      try {
-        json = await res.json();
-      } catch {
-        text = truncate(await res.text());
+      if (cookieJar) cookieJar.absorb(res.headers);
+
+      if (TRANSIENT_STATUS.has(res.status) && attempt < MAX_RETRIES) {
+        const waitMs = RETRY_BASE_MS * 2 ** attempt;
+        console.log(`retrying ${method} ${path} after transient status ${res.status} (attempt ${attempt + 1}/${MAX_RETRIES})`);
+        await sleep(waitMs);
+        continue;
       }
-    } else {
-      text = truncate(await res.text());
-      try {
-        json = JSON.parse(text);
-      } catch {}
-    }
 
-    return {
-      status: res.status,
-      ok: res.ok,
-      json,
-      text,
-      headers: res.headers,
-    };
-  } catch (error) {
-    return {
-      status: 0,
-      ok: false,
-      json: null,
-      text: truncate(`network_error: ${String(error?.message || error)}`),
-      headers: new Headers(),
-    };
+      let json;
+      let text;
+      const contentType = res.headers.get("content-type") || "";
+      if (contentType.includes("application/json")) {
+        try {
+          json = await res.json();
+        } catch {
+          text = truncate(await res.text());
+        }
+      } else {
+        text = truncate(await res.text());
+        try {
+          json = JSON.parse(text);
+        } catch {}
+      }
+
+      return {
+        status: res.status,
+        ok: res.ok,
+        json,
+        text,
+        headers: res.headers,
+      };
+    } catch (error) {
+      clearTimeout(timeout);
+      const isNetworkish = error?.name === "AbortError" || String(error?.message || error).toLowerCase().includes("fetch");
+      if (isNetworkish && attempt < MAX_RETRIES) {
+        const waitMs = RETRY_BASE_MS * 2 ** attempt;
+        console.log(`retrying ${method} ${path} after network/timeout error (attempt ${attempt + 1}/${MAX_RETRIES})`);
+        await sleep(waitMs);
+        continue;
+      }
+
+      return {
+        status: 0,
+        ok: false,
+        json: null,
+        text: truncate(`network_error: ${String(error?.message || error)}`),
+        headers: new Headers(),
+      };
+    }
   }
+
+  return {
+    status: 0,
+    ok: false,
+    json: null,
+    text: "network_error: retry_exhausted",
+    headers: new Headers(),
+  };
 }
 
 const results = [];

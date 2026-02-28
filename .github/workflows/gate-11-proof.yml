@@ -11,16 +11,24 @@ on:
         description: "Optional x-vercel-protection-bypass override"
         required: false
         type: string
+      pr_number:
+        description: "Optional PR number to post/update proof summary comment"
+        required: false
+        type: string
 
 jobs:
   proof:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    permissions:
+      contents: read
+      pull-requests: write
     env:
       BASE_URL: ${{ inputs.base_url }}
       SMOKE_EMAIL: ${{ secrets.SMOKE_EMAIL }}
       SMOKE_PASSWORD: ${{ secrets.SMOKE_PASSWORD }}
       VERCEL_PROTECTION_BYPASS: ${{ inputs.vercel_protection_bypass != '' && inputs.vercel_protection_bypass || secrets.VERCEL_PROTECTION_BYPASS }}
+      VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
 
     steps:
       - name: Checkout
@@ -71,6 +79,7 @@ jobs:
           exit 0
 
       - name: Upload proof artifacts
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: gate-11-proof-artifacts
@@ -79,6 +88,7 @@ jobs:
             .codex/artifacts/gate-11/ci-gate-10.2x-smoke.txt
 
       - name: Write job summary
+        if: always()
         run: |
           {
             echo "## Gate 11 Proof Summary"
@@ -95,6 +105,56 @@ jobs:
             echo
             echo "> Reminder: verify Vercel runtime logs for expected endpoint signatures (/api/ai/wardrobe/tag, /api/ai/wardrobe/tag-batch, /api/ai/outfit, and upload pipeline endpoints)."
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Post/update PR comment summary
+        if: always() && inputs.pr_number != ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+
+            const prNumber = Number('${{ inputs.pr_number }}');
+            if (!Number.isFinite(prNumber) || prNumber <= 0) {
+              core.setFailed('Invalid pr_number input. Provide a numeric PR number.');
+              return;
+            }
+
+            const gate11Path = '.codex/artifacts/gate-11/ci-gate-11-proof.txt';
+            const smokePath = '.codex/artifacts/gate-11/ci-gate-10.2x-smoke.txt';
+            const gate11 = fs.existsSync(gate11Path) ? fs.readFileSync(gate11Path, 'utf8') : '';
+            const smoke = fs.existsSync(smokePath) ? fs.readFileSync(smokePath, 'utf8') : '';
+
+            const findTotal = (text) => {
+              const m = text.match(/^TOTAL:\s.*$/m);
+              return m ? m[0] : 'TOTAL: unavailable';
+            };
+
+            const marker = '<!-- gate-11-proof-bot -->';
+            const body = `${marker}\n## Gate 11 CI Proof Result\n\n- BASE_URL: ${{ inputs.base_url }}\n- gate-11-proof: ${'${{ steps.gate11.outputs.exit_code }}' === '0' ? 'PASS' : 'FAIL'} (exit ${'${{ steps.gate11.outputs.exit_code }}'})\n- gate-10.2x-smoke: ${'${{ steps.gate102x.outputs.exit_code }}' === '0' ? 'PASS' : 'FAIL'} (exit ${'${{ steps.gate102x.outputs.exit_code }}'})\n\n### Totals\n- gate-11-proof: ${findTotal(gate11)}\n- gate-10.2x-smoke: ${findTotal(smoke)}\n\nArtifacts: download \`gate-11-proof-artifacts\` from this workflow run.\n\nReminder: validate Vercel runtime log signatures for /api/ai/wardrobe/tag, /api/ai/wardrobe/tag-batch, /api/ai/outfit, and upload pipeline endpoints.`;
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              per_page: 100,
+            });
+
+            const existing = comments.find((c) => c.body && c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body,
+              });
+            }
 
       - name: Fail workflow if either proof script failed
         if: steps.gate11.outputs.exit_code != '0' || steps.gate102x.outputs.exit_code != '0'
