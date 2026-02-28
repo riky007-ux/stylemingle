@@ -34,7 +34,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-         ref: ${{ github.head_ref || github.ref }}
+         ref: ${{ inputs.pr_number != '' && format('refs/pull/{0}/head', inputs.pr_number) || github.ref }}
 
       - name: Setup Node
         uses: actions/setup-node@v4
