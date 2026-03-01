@@ -36,6 +36,13 @@ jobs:
         with:
          ref: ${{ inputs.pr_number != '' && format('refs/pull/{0}/head', inputs.pr_number) || github.ref }}
 
+      - name: Report checked out SHA
+        run: |
+          echo "GITHUB_REF=$GITHUB_REF"
+          echo "GITHUB_SHA=$GITHUB_SHA"
+          echo "CHECKED_OUT_SHA=$(git rev-parse HEAD)"
+          git log -1 --oneline
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
@@ -56,6 +63,9 @@ jobs:
             echo "Missing required repository secret: SMOKE_PASSWORD"
             exit 2
           fi
+          if [ -z "${VERCEL_PROTECTION_BYPASS:-}" ] && [ -z "${VERCEL_AUTOMATION_BYPASS_SECRET:-}" ]; then
+            echo "Missing bypass secret env (VERCEL_PROTECTION_BYPASS or VERCEL_AUTOMATION_BYPASS_SECRET). If Deployment Protection is enabled, CI requests may be blocked."
+          fi
 
       - name: Prepare artifact directory
         run: mkdir -p .codex/artifacts/gate-11
@@ -64,8 +74,8 @@ jobs:
         id: gate11
         run: |
           set +e
-          node .codex/gate-11-proof.mjs > .codex/artifacts/gate-11/ci-gate-11-proof.txt 2>&1
-          code=$?
+          node .codex/gate-11-proof.mjs 2>&1 | tee .codex/artifacts/gate-11/ci-gate-11-proof.txt
+          code=${PIPESTATUS[0]}
           echo "exit_code=$code" >> "$GITHUB_OUTPUT"
           echo "EXIT_CODE=$code" >> .codex/artifacts/gate-11/ci-gate-11-proof.txt
           exit 0
@@ -74,8 +84,8 @@ jobs:
         id: gate102x
         run: |
           set +e
-          node .codex/gate-10.2x-smoke.mjs > .codex/artifacts/gate-11/ci-gate-10.2x-smoke.txt 2>&1
-          code=$?
+          node .codex/gate-10.2x-smoke.mjs 2>&1 | tee .codex/artifacts/gate-11/ci-gate-10.2x-smoke.txt
+          code=${PIPESTATUS[0]}
           echo "exit_code=$code" >> "$GITHUB_OUTPUT"
           echo "EXIT_CODE=$code" >> .codex/artifacts/gate-11/ci-gate-10.2x-smoke.txt
           exit 0
@@ -101,9 +111,17 @@ jobs:
             echo
             echo "### gate-11-proof.mjs"
             grep -E "^TOTAL:" .codex/artifacts/gate-11/ci-gate-11-proof.txt || tail -n 20 .codex/artifacts/gate-11/ci-gate-11-proof.txt
+            echo "#### gate-11-proof root cause (if any)"
+            grep -E "^(ROOT_CAUSE|FAIL|ERROR|HTTP|Missing)" .codex/artifacts/gate-11/ci-gate-11-proof.txt | head -n 50 || true
+            echo "#### Tail (last 40 lines):"
+            tail -n 40 .codex/artifacts/gate-11/ci-gate-11-proof.txt || true
             echo
             echo "### gate-10.2x-smoke.mjs"
             grep -E "^TOTAL:" .codex/artifacts/gate-11/ci-gate-10.2x-smoke.txt || tail -n 20 .codex/artifacts/gate-11/ci-gate-10.2x-smoke.txt
+            echo "#### gate-10.2x-smoke root cause (if any)"
+            grep -E "^(ROOT_CAUSE|FAIL|ERROR|HTTP|Missing)" .codex/artifacts/gate-11/ci-gate-10.2x-smoke.txt | head -n 50 || true
+            echo "#### Tail (last 40 lines):"
+            tail -n 40 .codex/artifacts/gate-11/ci-gate-10.2x-smoke.txt || true
             echo
             echo "> Reminder: verify Vercel runtime logs for expected endpoint signatures (/api/ai/wardrobe/tag, /api/ai/wardrobe/tag-batch, /api/ai/outfit, and upload pipeline endpoints)."
           } >> "$GITHUB_STEP_SUMMARY"
