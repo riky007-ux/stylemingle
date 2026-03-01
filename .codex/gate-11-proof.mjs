@@ -4,6 +4,7 @@ const rawBaseUrl = process.env.BASE_URL;
 const SMOKE_EMAIL = process.env.SMOKE_EMAIL;
 const SMOKE_PASSWORD = process.env.SMOKE_PASSWORD;
 const PROTECTION_BYPASS = process.env.VERCEL_PROTECTION_BYPASS || process.env.VERCEL_AUTOMATION_BYPASS_SECRET || "";
+const APP_AUTH_COOKIE_NAME = "auth";
 
 function normalizeBaseUrl(value) {
   if (!value) return "";
@@ -11,6 +12,20 @@ function normalizeBaseUrl(value) {
   if (!trimmed) return "";
   if (/^https?:\/\//i.test(trimmed)) return trimmed.replace(/\/$/, "");
   return `https://${trimmed}`.replace(/\/$/, "");
+}
+
+function extractSetCookieLines(headers) {
+  if (typeof headers.getSetCookie === "function") return headers.getSetCookie();
+  const single = headers.get("set-cookie");
+  return single ? [single] : [];
+}
+
+function cookieNamesFromHeaders(headers) {
+  return extractSetCookieLines(headers)
+    .map((entry) => String(entry).split(";")[0])
+    .map((pair) => pair.slice(0, pair.indexOf("=")))
+    .map((name) => name.trim())
+    .filter(Boolean);
 }
 
 const BASE_URL = normalizeBaseUrl(rawBaseUrl);
@@ -33,24 +48,30 @@ const RETRY_BASE_MS = 450;
 const REQUEST_TIMEOUT_MS = 15_000;
 
 class CookieJar {
-  constructor() { this.cookies = new Map(); }
+  constructor() {
+    this.cookies = new Map();
+  }
   absorb(headers) {
-    let setCookies = [];
-    if (typeof headers.getSetCookie === "function") setCookies = headers.getSetCookie();
-    else {
-      const single = headers.get("set-cookie");
-      if (single) setCookies = [single];
-    }
+    const setCookies = extractSetCookieLines(headers);
     for (const entry of setCookies) {
       const pair = String(entry).split(";")[0];
       const idx = pair.indexOf("=");
-      if (idx > 0) this.cookies.set(pair.slice(0, idx).trim(), pair.slice(idx + 1).trim());
+      if (idx > 0) {
+        const name = pair.slice(0, idx).trim();
+        const value = pair.slice(idx + 1).trim();
+        if (name) this.cookies.set(name, value);
+      }
     }
   }
   header() {
     return [...this.cookies.entries()].map(([k, v]) => `${k}=${v}`).join("; ");
   }
-  hasAny() { return this.cookies.size > 0; }
+  has(name) {
+    return this.cookies.has(name);
+  }
+  names() {
+    return [...this.cookies.keys()];
+  }
 }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -62,7 +83,7 @@ async function req(path, { method = "GET", body, jar, auth = false, acceptHtml =
     headers["x-vercel-protection-bypass"] = PROTECTION_BYPASS;
     headers["x-vercel-set-bypass-cookie"] = "true";
   }
-  if (auth && jar?.hasAny()) headers.cookie = jar.header();
+  if (auth && jar?.names().length) headers.cookie = jar.header();
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt += 1) {
     const controller = new AbortController();
@@ -90,13 +111,27 @@ async function req(path, { method = "GET", body, jar, auth = false, acceptHtml =
       let text = "";
       let json = null;
       if (ct.includes("application/json")) {
-        try { json = await res.json(); } catch { text = await res.text(); }
+        try {
+          json = await res.json();
+        } catch {
+          text = await res.text();
+        }
       } else {
         text = await res.text();
-        try { json = JSON.parse(text); } catch {}
+        try {
+          json = JSON.parse(text);
+        } catch {}
       }
 
-      return { status: res.status, ok: res.ok, text, json, url: `${BASE_URL}${path}` };
+      return {
+        status: res.status,
+        ok: res.ok,
+        text,
+        json,
+        url: `${BASE_URL}${path}`,
+        location: res.headers.get("location") || "",
+        cookieNames: cookieNamesFromHeaders(res.headers),
+      };
     } catch (error) {
       clearTimeout(timeout);
       const isNetworkish = error?.name === "AbortError" || String(error?.message || error).toLowerCase().includes("fetch");
@@ -106,11 +141,19 @@ async function req(path, { method = "GET", body, jar, auth = false, acceptHtml =
         await sleep(waitMs);
         continue;
       }
-      return { status: 0, ok: false, text: `network_error: ${String(error?.message || error)}`, json: null, url: `${BASE_URL}${path}` };
+      return {
+        status: 0,
+        ok: false,
+        text: `network_error: ${String(error?.message || error)}`,
+        json: null,
+        url: `${BASE_URL}${path}`,
+        location: "",
+        cookieNames: [],
+      };
     }
   }
 
-  return { status: 0, ok: false, text: "network_error: retry_exhausted", json: null, url: `${BASE_URL}${path}` };
+  return { status: 0, ok: false, text: "network_error: retry_exhausted", json: null, url: `${BASE_URL}${path}`, location: "", cookieNames: [] };
 }
 
 function htmlSnippet(html, max = 200) {
@@ -141,7 +184,19 @@ function checkSelectors(docName, page, selectors) {
     body: { email: SMOKE_EMAIL, password: SMOKE_PASSWORD },
     jar,
   });
-  add("Auth login + cookie", login.status === 200 && jar.hasAny(), `POST /api/auth/login -> ${login.status}; cookie=${jar.hasAny() ? "present" : "missing"}`);
+  const loginStatusOk = login.status === 200 || (login.status >= 300 && login.status < 400);
+  const appCookiePresent = jar.has(APP_AUTH_COOKIE_NAME) || login.cookieNames.includes(APP_AUTH_COOKIE_NAME);
+  const cookieNames = [...new Set([...login.cookieNames, ...jar.names()])];
+  const loginOk = loginStatusOk && appCookiePresent;
+  add(
+    "Auth login + app cookie",
+    loginOk,
+    `POST /api/auth/login -> ${login.status}; location=${login.location || "<none>"}; cookie_names=${cookieNames.join(",") || "<none>"}`,
+  );
+
+  if (!loginOk) {
+    console.log(`ROOT_CAUSE: login did not set app auth cookie; status=${login.status}; location=${login.location || "<none>"}; cookie_names=${cookieNames.join(",") || "<none>"}`);
+  }
 
   const wardrobePage = await req("/dashboard/wardrobe?debug=1", { jar, auth: true, acceptHtml: true });
   add("Wardrobe page load", wardrobePage.status === 200, `GET /dashboard/wardrobe?debug=1 -> ${wardrobePage.status}; url=${wardrobePage.url}`);

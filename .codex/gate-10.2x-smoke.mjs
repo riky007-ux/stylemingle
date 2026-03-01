@@ -4,6 +4,7 @@ const rawBaseUrl = process.env.BASE_URL;
 const SMOKE_EMAIL = process.env.SMOKE_EMAIL;
 const SMOKE_PASSWORD = process.env.SMOKE_PASSWORD;
 const VERCEL_PROTECTION_BYPASS = process.env.VERCEL_PROTECTION_BYPASS || process.env.VERCEL_AUTOMATION_BYPASS_SECRET || "";
+const APP_AUTH_COOKIE_NAME = "auth";
 
 const nowUtc = new Date().toISOString();
 
@@ -13,6 +14,20 @@ function normalizeBaseUrl(value) {
   if (!trimmed) return "";
   if (/^https?:\/\//i.test(trimmed)) return trimmed.replace(/\/$/, "");
   return `https://${trimmed}`.replace(/\/$/, "");
+}
+
+function extractSetCookieLines(headers) {
+  if (typeof headers.getSetCookie === "function") return headers.getSetCookie();
+  const single = headers.get("set-cookie");
+  return single ? [single] : [];
+}
+
+function cookieNamesFromHeaders(headers) {
+  return extractSetCookieLines(headers)
+    .map((entry) => String(entry).split(";")[0])
+    .map((pair) => pair.slice(0, pair.indexOf("=")))
+    .map((name) => name.trim())
+    .filter(Boolean);
 }
 
 const BASE_URL = normalizeBaseUrl(rawBaseUrl);
@@ -46,14 +61,7 @@ class CookieJar {
   }
 
   absorb(headers) {
-    let setCookies = [];
-
-    if (typeof headers.getSetCookie === "function") {
-      setCookies = headers.getSetCookie();
-    } else {
-      const single = headers.get("set-cookie");
-      if (single) setCookies = [single];
-    }
+    const setCookies = extractSetCookieLines(headers);
 
     for (const entry of setCookies) {
       const pair = String(entry).split(";")[0];
@@ -71,8 +79,12 @@ class CookieJar {
     return [...this.cookies.entries()].map(([k, v]) => `${k}=${v}`).join("; ");
   }
 
-  hasAny() {
-    return this.cookies.size > 0;
+  has(name) {
+    return this.cookies.has(name);
+  }
+
+  names() {
+    return [...this.cookies.keys()];
   }
 }
 
@@ -155,6 +167,8 @@ async function request(path, { method = "GET", body, cookieJar, useCookies = fal
         headers: res.headers,
         endpoint: `${method} ${path}`,
         url: `${BASE_URL}${path}`,
+        location: res.headers.get("location") || "",
+        cookieNames: cookieNamesFromHeaders(res.headers),
       };
     } catch (error) {
       clearTimeout(timeout);
@@ -174,6 +188,8 @@ async function request(path, { method = "GET", body, cookieJar, useCookies = fal
         headers: new Headers(),
         endpoint: `${method} ${path}`,
         url: `${BASE_URL}${path}`,
+        location: "",
+        cookieNames: [],
       };
     }
   }
@@ -186,11 +202,19 @@ async function request(path, { method = "GET", body, cookieJar, useCookies = fal
     headers: new Headers(),
     endpoint: `${method} ${path}`,
     url: `${BASE_URL}${path}`,
+    location: "",
+    cookieNames: [],
   };
 }
 
 const results = [];
 const addResult = (area, ok, detail, extra = {}) => results.push({ area, ok, detail, ...extra });
+
+function checkUnauthorizedAfterLogin(resp, cookieJar) {
+  if (resp.status !== 401) return;
+  const cookieNames = cookieJar.names().join(",") || "<none>";
+  console.log(`ROOT_CAUSE: unauthorized after login (cookie_names=${cookieNames}, status=401, endpoint=${resp.endpoint})`);
+}
 
 (async () => {
   const authedJar = new CookieJar();
@@ -210,13 +234,21 @@ const addResult = (area, ok, detail, extra = {}) => results.push({ area, ok, det
     cookieJar: authedJar,
   });
 
-  const loginHasCookie = authedJar.hasAny();
+  const loginStatusOk = login.status === 200 || (login.status >= 300 && login.status < 400);
+  const appCookiePresent = authedJar.has(APP_AUTH_COOKIE_NAME) || login.cookieNames.includes(APP_AUTH_COOKIE_NAME);
+  const loginCookieNames = [...new Set([...login.cookieNames, ...authedJar.names()])];
+  const loginOk = loginStatusOk && appCookiePresent;
+
   addResult(
-    "B) Auth (login + cookie)",
-    login.status === 200 && loginHasCookie,
-    `POST /api/auth/login -> ${login.status}; cookie=${loginHasCookie ? "present" : "missing"}`,
+    "B) Auth (login + app cookie)",
+    loginOk,
+    `POST /api/auth/login -> ${login.status}; location=${login.location || "<none>"}; cookie_names=${loginCookieNames.join(",") || "<none>"}`,
     { response: login.json ?? login.text, endpoint: login.endpoint, status: login.status, url: login.url }
   );
+
+  if (!loginOk) {
+    console.log(`ROOT_CAUSE: login did not set app auth cookie; status=${login.status}; location=${login.location || "<none>"}; cookie_names=${loginCookieNames.join(",") || "<none>"}`);
+  }
 
   const unauthCalls = [
     { name: "items", path: "/api/wardrobe/items", method: "GET" },
@@ -232,6 +264,7 @@ const addResult = (area, ok, detail, extra = {}) => results.push({ area, ok, det
   }
 
   const itemsRes = await request("/api/wardrobe/items", { method: "GET", cookieJar: authedJar, useCookies: true });
+  checkUnauthorizedAfterLogin(itemsRes, authedJar);
   const items = Array.isArray(itemsRes.json) ? itemsRes.json : [];
   const itemIds = items.map((it) => it?.id).filter((id) => typeof id === "string");
   const missingMeta = items
@@ -258,13 +291,14 @@ const addResult = (area, ok, detail, extra = {}) => results.push({ area, ok, det
 
   const tagBatchIds = (missingMeta.length > 0 ? missingMeta : itemIds).slice(0, 6);
   let tagBatchRes = { status: 0, json: null, text: "skipped", endpoint: "POST /api/ai/wardrobe/tag-batch", url: `${BASE_URL}/api/ai/wardrobe/tag-batch` };
-  if (login.status === 200 && tagBatchIds.length > 0) {
+  if (loginOk && tagBatchIds.length > 0) {
     tagBatchRes = await request("/api/ai/wardrobe/tag-batch", {
       method: "POST",
       cookieJar: authedJar,
       useCookies: true,
       body: { itemIds: tagBatchIds, force: false },
     });
+    checkUnauthorizedAfterLogin(tagBatchRes, authedJar);
   }
 
   const tagBatchCode = getAppCode(tagBatchRes.json);
@@ -280,13 +314,14 @@ const addResult = (area, ok, detail, extra = {}) => results.push({ area, ok, det
 
   const singleTagId = tagBatchIds[0] || itemIds[0];
   let tagRes = { status: 0, json: null, text: "skipped", endpoint: "POST /api/ai/wardrobe/tag", url: `${BASE_URL}/api/ai/wardrobe/tag` };
-  if (login.status === 200 && singleTagId) {
+  if (loginOk && singleTagId) {
     tagRes = await request("/api/ai/wardrobe/tag", {
       method: "POST",
       cookieJar: authedJar,
       useCookies: true,
       body: { itemId: singleTagId, force: false },
     });
+    checkUnauthorizedAfterLogin(tagRes, authedJar);
   }
   const tagCode = getAppCode(tagRes.json);
   const tagOk =
@@ -300,13 +335,14 @@ const addResult = (area, ok, detail, extra = {}) => results.push({ area, ok, det
   );
 
   let outfitRes = { status: 0, json: null, text: "skipped", endpoint: "POST /api/ai/outfit", url: `${BASE_URL}/api/ai/outfit` };
-  if (login.status === 200) {
+  if (loginOk) {
     outfitRes = await request("/api/ai/outfit", {
       method: "POST",
       cookieJar: authedJar,
       useCookies: true,
       body: { occasion: "daily errands", weather: "mild", mood: "confident" },
     });
+    checkUnauthorizedAfterLogin(outfitRes, authedJar);
   }
 
   const explanation = outfitRes.json?.explanation;

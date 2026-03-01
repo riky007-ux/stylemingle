@@ -131,7 +131,7 @@ export default function AvatarClient() {
       <h1 className="text-3xl font-semibold mb-4">Avatar Builder</h1>
       <ExperimentalIndicator visible={DEBUG_FLAGS_ENABLED || queryDebugEnabled} />
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-        <div className="bg-white rounded-2xl shadow-sm p-4 h-[500px] xl:col-span-1 relative overflow-hidden" data-testid={AVATAR_V2_ENABLED ? "avatar-v2-enabled" : "avatar-v1-enabled"}>
+        <div className="bg-white rounded-2xl shadow-sm p-4 h-[500px] xl:col-span-1 relative overflow-hidden" data-testid={AVATAR_V2_ENABLED ? undefined : "avatar-v1-enabled"}>
           {AVATAR_V2_ENABLED ? <AvatarV2SVG preferences={prefs} /> : <AvatarSVG preferences={prefs} />}
           {overlaySlots.map(({ slot, item }) => {
             const src = item?.imageUrl ? (enhancedMap[item.id] || item.imageUrl) : null;
@@ -139,7 +139,6 @@ export default function AvatarClient() {
             return (
               <div
                 key={slot}
-                data-testid={`outfit-overlay-${slot}`}
                 className="absolute left-1/2 top-1/2 h-44 w-44 -translate-x-1/2 -translate-y-1/2"
                 style={{
                   transform: `translate(-50%, -50%) translate(${adjust.x}px, ${adjust.y}px) scale(${adjust.scale})`,
@@ -214,7 +213,7 @@ export default function AvatarClient() {
           </div>
 
           {AVATAR_V2_ENABLED && (
-            <details className="rounded-lg border p-3" open data-testid="avatar-fit-controls">
+            <details className="rounded-lg border p-3" open>
               <summary className="cursor-pointer text-sm font-medium">Adjust fit</summary>
               <p className="mt-2 text-xs text-zinc-500">Best results with BG removal enabled.</p>
               <div className="mt-3 space-y-3">
