@@ -25,6 +25,7 @@ export default function TopNav() {
             <Link href="/dashboard">Dashboard</Link>
             <Link href="/dashboard/wardrobe">Wardrobe</Link>
             <Link href="/dashboard/outfits">Outfits</Link>
+            <Link href="/dashboard/style">Style</Link>
             <Link href="/dashboard/avatar">Avatar</Link>
             <Link href="/dashboard/avatar" className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-slate-900 text-white text-xs">A</Link>
             <button onClick={handleLogout}>Logout</button>

@@ -11,6 +11,7 @@ export const users = sqliteTable("users", {
   id: text("id").primaryKey(),
   email: text("email").notNull().unique(),
   passwordHash: text("passwordHash").notNull(),
+  isPremium: integer("isPremium", { mode: "boolean" }).notNull().default(false),
   createdAt: integer("createdAt", { mode: "timestamp" }).notNull(),
 });
 
@@ -69,10 +70,26 @@ export const ratings = sqliteTable("ratings", {
     .notNull()
     .references(() => outfits.id),
   rating: integer("rating").notNull(),
+  reasons: text("reasons"),
+  note: text("note"),
   userId: text("userId")
     .notNull()
     .references(() => users.id),
   createdAt: integer("createdAt", { mode: "timestamp" }).notNull(),
+});
+
+export const user_style_profile = sqliteTable("user_style_profile", {
+  userId: text("userId")
+    .primaryKey()
+    .references(() => users.id),
+  styleVibes: text("styleVibes").notNull().default("[]"),
+  fitPreference: text("fitPreference"),
+  comfortFashion: integer("comfortFashion").notNull().default(50),
+  colorsLove: text("colorsLove").notNull().default("[]"),
+  colorsAvoid: text("colorsAvoid").notNull().default("[]"),
+  climate: text("climate"),
+  budgetSensitivity: text("budgetSensitivity"),
+  updatedAt: integer("updatedAt", { mode: "timestamp" }).notNull(),
 });
 
 export default {
@@ -81,4 +98,5 @@ export default {
   avatar_preferences,
   outfits,
   ratings,
+  user_style_profile,
 };

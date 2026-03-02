@@ -7,6 +7,8 @@ import { randomUUID } from "crypto";
 import { AUTH_COOKIE_NAME, verifyToken } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { outfits, wardrobe_items } from "@/lib/schema";
+import { hasEntitlement, hasProofTokenBypass } from "@/lib/personalization/entitlements";
+import { buildProfileSummary, computeBias, getStyleProfile } from "@/lib/personalization/profile";
 
 type Category = "top" | "bottom" | "shoes" | "outerwear";
 
@@ -19,6 +21,7 @@ type OutfitItem = {
 };
 
 type OutfitResponse = {
+  outfitId?: string;
   top: OutfitItem | null;
   bottom: OutfitItem | null;
   shoes: OutfitItem | null;
@@ -26,6 +29,16 @@ type OutfitResponse = {
   explanation: string[];
   followUpQuestion: string;
   source: "fallback" | "openai";
+  meta?: {
+    personalizationUsed: boolean;
+    profileVersion: string;
+    biasSignals: {
+      formalityBias: number;
+      avoidColorsCount: number;
+      recentFeedbackCount: number;
+      avgRating: number;
+    };
+  };
 };
 
 function getUserId() {
@@ -61,6 +74,11 @@ export async function POST(request: Request) {
 
   const body = await request.json();
   const { occasion, weather, mood } = body;
+
+  const personalizationEnabled = (await hasEntitlement(userId, "personalization_memory")) || hasProofTokenBypass(request);
+  const profile = personalizationEnabled ? await getStyleProfile(userId) : null;
+  const biasSignals = personalizationEnabled ? await computeBias(userId) : { formalityBias: 0, avoidColorsCount: 0, recentFeedbackCount: 0, avgRating: 0 };
+  const profileSummary = profile ? buildProfileSummary(profile, biasSignals) : "none";
 
   let items: OutfitItem[] = [];
   try {
@@ -117,12 +135,19 @@ export async function POST(request: Request) {
     explanation: [
       "Built from your most recent tagged basics.",
       "This combination balances silhouette and color flexibility.",
+      personalizationEnabled ? `Profile memory applied: ${profileSummary}` : "Upgrade to premium to enable personalization memory.",
     ],
     followUpQuestion: "Want this tuned for a specific venue or temperature?",
     source: "fallback",
+    meta: {
+      personalizationUsed: personalizationEnabled,
+      profileVersion: profile?.updatedAt ? profile.updatedAt.toISOString() : "none",
+      biasSignals,
+    },
   };
 
   let result: OutfitResponse = fallback;
+  const generatedOutfitId = randomUUID();
 
   if (process.env.OPENAI_API_KEY) {
     const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -139,7 +164,17 @@ export async function POST(request: Request) {
             content:
               "You are a safe stylist assistant. Return JSON only with keys: topId,bottomId,shoesId,outerwearId(optional),explanation(array of short bullets),followUpQuestion.",
           },
-          { role: "user", content: JSON.stringify({ occasion, weather, mood, items: compactItems }) },
+          {
+            role: "user",
+            content: JSON.stringify({
+              occasion,
+              weather,
+              mood,
+              items: compactItems,
+              profileSummary: personalizationEnabled ? profileSummary : "none",
+              biasSignals,
+            }),
+          },
         ],
       });
 
@@ -156,6 +191,7 @@ export async function POST(request: Request) {
             ? parsed.followUpQuestion
             : fallback.followUpQuestion,
         source: "openai",
+        meta: fallback.meta,
       };
     } catch {
       result = fallback;
@@ -164,7 +200,7 @@ export async function POST(request: Request) {
 
   try {
     await db.insert(outfits).values({
-      id: randomUUID(),
+      id: generatedOutfitId,
       userId,
       name: `Outfit for ${occasion || "everyday"}`,
       description: "AI stylist generated outfit",
@@ -175,5 +211,5 @@ export async function POST(request: Request) {
     });
   } catch {}
 
-  return NextResponse.json(result);
+  return NextResponse.json({ ...result, outfitId: generatedOutfitId });
 }

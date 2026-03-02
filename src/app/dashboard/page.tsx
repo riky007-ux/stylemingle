@@ -15,6 +15,10 @@ export default function Page() {
             <h2 className="font-semibold text-xl">AI Stylist</h2>
             <p className="text-sm text-zinc-600">Generate explainable outfit suggestions from metadata.</p>
           </Link>
+          <Link href="/dashboard/style" className="border rounded-xl p-5 hover:bg-slate-50">
+            <h2 className="font-semibold text-xl">Style Memory</h2>
+            <p className="text-sm text-zinc-600">Save personal fit, color, and vibe preferences across sessions.</p>
+          </Link>
         </div>
       </section>
     </div>

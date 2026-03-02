@@ -22,6 +22,13 @@
       "when": 1768198800000,
       "tag": "0002_gate_10_2_avatar_and_stylist",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1768202400000,
+      "tag": "0003_gate_12_personalization_memory",
+      "breakpoints": true
     }
   ]
 }
