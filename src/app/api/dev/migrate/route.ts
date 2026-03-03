@@ -11,6 +11,11 @@ export const runtime = "nodejs";
 
 type PremiumColumnName = "isPremium" | "is_premium" | null;
 
+type JournalSummary = {
+  entryCount: number;
+  lastTag: string | null;
+};
+
 function jsonError(status: number, code: string, message: string, extras: Record<string, unknown> = {}) {
   return NextResponse.json({ ok: false, code, message, ...extras }, { status });
 }
@@ -41,6 +46,20 @@ function listMigrationFiles(migrationsFolder: string) {
   const all = fs.existsSync(migrationsFolder) ? fs.readdirSync(migrationsFolder) : [];
   const sqlFiles = all.filter((name) => /^\d+.*\.sql$/i.test(name)).sort();
   return { allFiles: all, sqlFiles };
+}
+
+function readJournalSummary(journalPath: string): JournalSummary {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(journalPath, "utf8"));
+    const entries = Array.isArray(parsed?.entries) ? parsed.entries : [];
+    const last = entries.length > 0 ? entries[entries.length - 1] : null;
+    return {
+      entryCount: entries.length,
+      lastTag: typeof last?.tag === "string" ? last.tag : null,
+    };
+  } catch {
+    return { entryCount: 0, lastTag: null };
+  }
 }
 
 async function detectUsersPremiumSchema(client: ReturnType<typeof createClient>) {
@@ -105,6 +124,17 @@ export async function POST(req: Request) {
     });
   }
 
+  const journal = readJournalSummary(journalPath);
+  if (journal.entryCount === 0 && sqlFiles.length > 0) {
+    const message = "Migration journal has zero entries while SQL files exist. Check drizzle/meta/_journal.json consistency.";
+    console.error(`ROOT_CAUSE: dev-migrate JOURNAL_MISMATCH ${safeTrim(message)}`);
+    return jsonError(500, "JOURNAL_MISMATCH", message, {
+      migrationFilesFound: sqlFiles.length,
+      latestMigrationName: sqlFiles[sqlFiles.length - 1] || null,
+      journal,
+    });
+  }
+
   const client = createClient({ url, authToken });
   const drizzleDb = drizzle(client);
 
@@ -129,6 +159,7 @@ export async function POST(req: Request) {
       return jsonError(500, "MIGRATIONS_DID_NOT_PRODUCE_SCHEMA", message, {
         migrationFilesFound: sqlFiles.length,
         latestMigrationName: sqlFiles[sqlFiles.length - 1] || null,
+        journal,
         after: {
           hasIsPremium: afterSchema.hasIsPremium,
           detectedPremiumColumnName: afterSchema.detectedPremiumColumnName,
@@ -143,6 +174,7 @@ export async function POST(req: Request) {
       alreadyUpToDate,
       migrationFilesFound: sqlFiles.length,
       latestMigrationName: sqlFiles[sqlFiles.length - 1] || null,
+      journal,
       after: {
         hasIsPremium: afterSchema.hasIsPremium,
         detectedPremiumColumnName: afterSchema.detectedPremiumColumnName,
@@ -159,6 +191,7 @@ export async function POST(req: Request) {
         alreadyUpToDate: true,
         migrationFilesFound: sqlFiles.length,
         latestMigrationName: sqlFiles[sqlFiles.length - 1] || null,
+        journal,
         after: {
           hasIsPremium: afterSchema.hasIsPremium,
           detectedPremiumColumnName: afterSchema.detectedPremiumColumnName,

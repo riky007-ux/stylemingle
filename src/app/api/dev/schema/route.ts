@@ -62,12 +62,23 @@ export async function GET(req: Request) {
   if ("error" in auth) return auth.error;
 
   const url = new URL(req.url);
-  const table = normalizeTableName(url.searchParams.get("table"));
-  if (!table) {
-    return jsonError(400, "INVALID_INPUT", "table query parameter is required");
-  }
+  const mode = String(url.searchParams.get("mode") || "").trim();
 
   try {
+    if (mode === "list-tables") {
+      const tables = await db.$client.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name ASC");
+      return NextResponse.json({
+        ok: true,
+        mode: "list-tables",
+        tables: (tables.rows || []).map((row: any) => String(row?.name || "")).filter(Boolean),
+      });
+    }
+
+    const table = normalizeTableName(url.searchParams.get("table"));
+    if (!table) {
+      return jsonError(400, "INVALID_INPUT", "table query parameter is required (or mode=list-tables)");
+    }
+
     const pragma = await db.$client.execute(`PRAGMA table_info(${table});`);
     const columns = (pragma.rows || []).map((row: any) => String(row?.name || ""));
     const detectedPremiumColumnName = table === "users" ? detectPremiumColumnName(columns) : null;

@@ -29,6 +29,13 @@
       "when": 1768202400000,
       "tag": "0003_gate_12_personalization_memory",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1768206000000,
+      "tag": "0004_gate_12_2_add_is_premium",
+      "breakpoints": true
     }
   ]
 }
