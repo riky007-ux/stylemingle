@@ -28,6 +28,8 @@ type OutfitResult = {
       recentFeedbackCount: number;
       avgRating: number;
     };
+    outfitStored?: boolean;
+    feedbackEnabled?: boolean;
   };
 };
 
@@ -232,33 +234,39 @@ export default function OutfitsPage() {
             </p>
           )}
 
-          <div className="mt-4 border-t pt-4" data-testid="outfit-feedback-form">
-            <h3 className="font-medium mb-2">Rate this outfit</h3>
-            <div className="flex gap-2 mb-2">
-              {[1, 2, 3, 4, 5].map((n) => (
-                <button key={n} onClick={() => setFeedbackRating(n)} className={`px-2 py-1 border rounded ${feedbackRating === n ? "bg-slate-900 text-white" : ""}`}>
-                  {n}
-                </button>
-              ))}
+          {result?.meta?.feedbackEnabled && result?.outfitId && result?.meta?.outfitStored ? (
+            <div className="mt-4 border-t pt-4" data-testid="outfit-feedback-form">
+              <h3 className="font-medium mb-2">Rate this outfit</h3>
+              <div className="flex gap-2 mb-2">
+                {[1, 2, 3, 4, 5].map((n) => (
+                  <button key={n} onClick={() => setFeedbackRating(n)} className={`px-2 py-1 border rounded ${feedbackRating === n ? "bg-slate-900 text-white" : ""}`}>
+                    {n}
+                  </button>
+                ))}
+              </div>
+              <div className="flex flex-wrap gap-2 mb-2">
+                {reasonOptions.map((reason) => (
+                  <button key={reason} onClick={() => toggleReason(reason)} className={`text-xs rounded-full px-3 py-1 border ${feedbackReasons.includes(reason) ? "bg-slate-900 text-white" : ""}`}>
+                    {reason}
+                  </button>
+                ))}
+              </div>
+              <input
+                value={feedbackNote}
+                onChange={(e) => setFeedbackNote(e.target.value)}
+                className="w-full border rounded p-2 text-sm"
+                placeholder="Optional note"
+              />
+              <button onClick={submitFeedback} className="mt-2 rounded-lg border px-3 py-2 text-sm">
+                Submit feedback
+              </button>
+              {feedbackSaved && <p className="text-xs mt-2 text-zinc-600">{feedbackSaved}</p>}
             </div>
-            <div className="flex flex-wrap gap-2 mb-2">
-              {reasonOptions.map((reason) => (
-                <button key={reason} onClick={() => toggleReason(reason)} className={`text-xs rounded-full px-3 py-1 border ${feedbackReasons.includes(reason) ? "bg-slate-900 text-white" : ""}`}>
-                  {reason}
-                </button>
-              ))}
-            </div>
-            <input
-              value={feedbackNote}
-              onChange={(e) => setFeedbackNote(e.target.value)}
-              className="w-full border rounded p-2 text-sm"
-              placeholder="Optional note"
-            />
-            <button onClick={submitFeedback} className="mt-2 rounded-lg border px-3 py-2 text-sm">
-              Submit feedback
-            </button>
-            {feedbackSaved && <p className="text-xs mt-2 text-zinc-600">{feedbackSaved}</p>}
-          </div>
+          ) : (
+            <p className="mt-4 text-xs text-zinc-500" data-testid="outfit-feedback-locked">
+              Feedback learning is Premium.
+            </p>
+          )}
 
           <button onClick={() => router.push("/dashboard/avatar?outfit=latest")} className="mt-4 rounded-lg border px-3 py-2">
             View on Avatar

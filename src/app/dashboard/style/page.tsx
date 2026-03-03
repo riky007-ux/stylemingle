@@ -1,14 +1,16 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 
 const VIBES = ["minimalist", "streetwear", "classic", "sporty", "smart-casual"];
 const FITS = ["tailored", "relaxed", "oversized", "athletic"];
 
+type ViewState = "loading" | "ready" | "unauthenticated" | "locked" | "schemaPending" | "error";
+
 export default function StyleProfilePage() {
-  const [loading, setLoading] = useState(true);
+  const [viewState, setViewState] = useState<ViewState>("loading");
   const [saving, setSaving] = useState(false);
-  const [locked, setLocked] = useState(false);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState("");
 
@@ -20,16 +22,28 @@ export default function StyleProfilePage() {
 
   useEffect(() => {
     const run = async () => {
+      setViewState("loading");
       const res = await fetch("/api/style-profile");
       const data = await res.json().catch(() => null);
-      if (res.status === 403) {
-        setLocked(true);
-        setLoading(false);
+
+      if (res.status === 401) {
+        setViewState("unauthenticated");
         return;
       }
+
+      if (res.status === 403) {
+        setViewState("locked");
+        return;
+      }
+
+      if (res.status === 503 && data?.code === "PERSONALIZATION_SCHEMA_PENDING") {
+        setViewState("schemaPending");
+        return;
+      }
+
       if (!res.ok || !data?.profile) {
         setError("Failed to load style profile");
-        setLoading(false);
+        setViewState("error");
         return;
       }
 
@@ -38,11 +52,12 @@ export default function StyleProfilePage() {
       setComfortFashion(typeof data.profile.comfortFashion === "number" ? data.profile.comfortFashion : 50);
       setColorsLove((data.profile.colorsLove || []).join(", "));
       setColorsAvoid((data.profile.colorsAvoid || []).join(", "));
-      setLoading(false);
+      setViewState("ready");
     };
+
     run().catch(() => {
       setError("Failed to load style profile");
-      setLoading(false);
+      setViewState("error");
     });
   }, []);
 
@@ -54,6 +69,7 @@ export default function StyleProfilePage() {
     setSaving(true);
     setSaved("");
     setError("");
+
     const res = await fetch("/api/style-profile", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -65,29 +81,57 @@ export default function StyleProfilePage() {
         colorsAvoid: colorsAvoid.split(",").map((v) => v.trim()).filter(Boolean),
       }),
     });
+
+    const payload = await res.json().catch(() => null);
+    if (res.status === 503 && payload?.code === "PERSONALIZATION_SCHEMA_PENDING") {
+      setViewState("schemaPending");
+      setSaving(false);
+      return;
+    }
+
     if (!res.ok) {
       setError("Save failed");
-    } else {
-      setSaved("Saved");
+      setSaving(false);
+      return;
     }
+
+    setSaved("Saved");
     setSaving(false);
   };
-
-  if (loading) return <div className="p-6">Loading…</div>;
 
   return (
     <div className="min-h-screen p-6 max-w-3xl mx-auto" data-testid="style-profile-page">
       <h1 className="text-3xl font-semibold mb-2">Style Preferences</h1>
       <p className="text-zinc-600 mb-6">Save your style memory to make outfit recommendations feel more like you.</p>
 
-      {locked && (
-        <div className="mb-4 rounded-xl border border-amber-400 bg-amber-50 p-4" data-testid="style-profile-lock">
+      {viewState === "loading" && <div>Loading…</div>}
+
+      {viewState === "unauthenticated" && (
+        <div className="rounded-xl border border-slate-300 bg-slate-50 p-4" data-testid="style-profile-login-needed">
+          <p className="font-medium">Please log in to set style preferences.</p>
+          <Link className="mt-2 inline-block text-sm underline" href="/login">
+            Go to login
+          </Link>
+        </div>
+      )}
+
+      {viewState === "locked" && (
+        <div className="rounded-xl border border-amber-400 bg-amber-50 p-4" data-testid="style-profile-lock">
           <p className="font-medium">Memory is Premium</p>
           <p className="text-sm text-zinc-700">Upgrade your plan to unlock cross-session style memory and learning.</p>
         </div>
       )}
 
-      {!locked && (
+      {viewState === "schemaPending" && (
+        <div className="rounded-xl border border-blue-300 bg-blue-50 p-4" data-testid="style-profile-schema-pending">
+          <p className="font-medium">Style memory is deploying, try again in a moment.</p>
+          <p className="text-sm text-zinc-700">We’re finishing a background database update for personalization.</p>
+        </div>
+      )}
+
+      {viewState === "error" && <p className="text-sm text-red-600">{error}</p>}
+
+      {viewState === "ready" && (
         <div className="space-y-6 bg-white border rounded-2xl p-5">
           <section>
             <h2 className="font-medium mb-2">Pick up to 3 vibes</h2>
