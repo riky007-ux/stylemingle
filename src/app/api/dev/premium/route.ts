@@ -1,9 +1,7 @@
-import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 
 import { getUserIdFromRequest } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { users } from "@/lib/schema";
 
 export const runtime = "nodejs";
 
@@ -13,23 +11,22 @@ type PremiumPayload = {
   token?: string;
 };
 
+type PremiumColumnName = "isPremium" | "is_premium" | null;
+
 function jsonError(status: number, code: string, message: string) {
   return NextResponse.json({ ok: false, code, message }, { status });
+}
+
+function safeTrim(value: unknown, max = 180) {
+  return String(value || "").replace(/\s+/g, " ").slice(0, max);
 }
 
 function isProdLocked() {
   return process.env.VERCEL_ENV === "production" && process.env.ALLOW_DEV_PREMIUM_ENDPOINT !== "true";
 }
 
-function isPremiumSchemaPending(error: unknown) {
-  const msg = String((error as any)?.message || error || "").toLowerCase();
-  const schemaHint = msg.includes("no such column") || msg.includes("unknown column") || msg.includes("does not exist") || msg.includes("sqlite_error");
-  const premiumHint = msg.includes("ispremium") || msg.includes("is premium");
-  return schemaHint && premiumHint;
-}
-
 function logRootCause(code: string, message: string) {
-  console.warn(`ROOT_CAUSE: dev-premium ${code} ${message}`);
+  console.warn(`ROOT_CAUSE: dev-premium ${code} ${safeTrim(message)}`);
 }
 
 function normalizeEmail(raw: unknown) {
@@ -61,11 +58,12 @@ async function parsePayload(req: Request): Promise<PremiumPayload | null> {
   };
 }
 
-
-async function hasUsersIsPremiumColumn() {
+async function detectPremiumColumnName(): Promise<PremiumColumnName> {
   const result = await db.$client.execute("PRAGMA table_info(users);");
   const columns = (result.rows || []).map((row: any) => String(row?.name || ""));
-  return columns.includes("isPremium");
+  if (columns.includes("isPremium")) return "isPremium";
+  if (columns.includes("is_premium")) return "is_premium";
+  return null;
 }
 
 async function validateAuthAndToken(req: Request, payload?: PremiumPayload | null) {
@@ -97,33 +95,27 @@ export async function GET(req: Request) {
   }
 
   try {
-    const hasColumn = await hasUsersIsPremiumColumn();
-    if (!hasColumn) {
+    const premiumColumn = await detectPremiumColumnName();
+    if (!premiumColumn) {
       const msg = "Missing users.isPremium column. Run /dashboard/dev/migrate (or apply migration 0003).";
-      logRootCause("PREMIUM_SCHEMA_PENDING", "users.isPremium column missing");
+      logRootCause("PREMIUM_SCHEMA_PENDING", "users premium column missing");
       return jsonError(503, "PREMIUM_SCHEMA_PENDING", msg);
     }
 
-    const found = await db
-      .select({ email: users.email, isPremium: users.isPremium })
-      .from(users)
-      .where(eq(users.email, email))
-      .limit(1);
+    const found = await db.$client.execute({
+      sql: `SELECT id, email, ${premiumColumn} AS premiumValue FROM users WHERE email = ? LIMIT 1`,
+      args: [email],
+    });
 
-    if (!found[0]) {
+    if (!(found.rows || [])[0]) {
       return jsonError(404, "USER_NOT_FOUND", "User not found");
     }
 
-    return NextResponse.json({ ok: true, email: found[0].email, isPremium: Boolean(found[0].isPremium) });
+    const row: any = found.rows[0];
+    return NextResponse.json({ ok: true, email: row.email, isPremium: Boolean(row.premiumValue) });
   } catch (error) {
-    if (isPremiumSchemaPending(error)) {
-      const safeMessage = "Premium column migration is pending";
-      logRootCause("PREMIUM_SCHEMA_PENDING", safeMessage);
-      return jsonError(503, "PREMIUM_SCHEMA_PENDING", safeMessage);
-    }
-
     const safeMessage = "Unexpected database error while reading premium status";
-    logRootCause("DEV_PREMIUM_INTERNAL", safeMessage);
+    logRootCause("DEV_PREMIUM_INTERNAL", `${safeMessage}: ${safeTrim((error as any)?.message || error)}`);
     return jsonError(500, "DEV_PREMIUM_INTERNAL", safeMessage);
   }
 }
@@ -141,33 +133,32 @@ export async function POST(req: Request) {
   }
 
   try {
-    const hasColumn = await hasUsersIsPremiumColumn();
-    if (!hasColumn) {
+    const premiumColumn = await detectPremiumColumnName();
+    if (!premiumColumn) {
       const msg = "Missing users.isPremium column. Run /dashboard/dev/migrate (or apply migration 0003).";
-      logRootCause("PREMIUM_SCHEMA_PENDING", "users.isPremium column missing");
+      logRootCause("PREMIUM_SCHEMA_PENDING", "users premium column missing");
       return jsonError(503, "PREMIUM_SCHEMA_PENDING", msg);
     }
 
-    const target = await db.select({ id: users.id, email: users.email }).from(users).where(eq(users.email, email)).limit(1);
-    if (!target[0]?.id) {
+    const target = await db.$client.execute({
+      sql: "SELECT id, email FROM users WHERE email = ? LIMIT 1",
+      args: [email],
+    });
+
+    const targetRow: any = (target.rows || [])[0];
+    if (!targetRow?.id) {
       return jsonError(404, "USER_NOT_FOUND", "User not found");
     }
 
-    await db
-      .update(users)
-      .set({ isPremium: enabled })
-      .where(and(eq(users.id, target[0].id), eq(users.email, email)));
+    await db.$client.execute({
+      sql: `UPDATE users SET ${premiumColumn} = ? WHERE id = ?`,
+      args: [enabled ? 1 : 0, targetRow.id],
+    });
 
     return NextResponse.json({ ok: true, email, enabled });
   } catch (error) {
-    if (isPremiumSchemaPending(error)) {
-      const safeMessage = "Premium column migration is pending";
-      logRootCause("PREMIUM_SCHEMA_PENDING", safeMessage);
-      return jsonError(503, "PREMIUM_SCHEMA_PENDING", safeMessage);
-    }
-
     const safeMessage = "Unexpected database error while updating premium status";
-    logRootCause("DEV_PREMIUM_INTERNAL", safeMessage);
+    logRootCause("DEV_PREMIUM_INTERNAL", `${safeMessage}: ${safeTrim((error as any)?.message || error)}`);
     return jsonError(500, "DEV_PREMIUM_INTERNAL", safeMessage);
   }
 }
