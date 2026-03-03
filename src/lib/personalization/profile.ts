@@ -20,6 +20,18 @@ type FeedbackBias = {
   avgRating: number;
 };
 
+export type StyleProfileResult = {
+  userId: string;
+  styleVibes: string[];
+  fitPreference: string | null;
+  comfortFashion: number;
+  colorsLove: string[];
+  colorsAvoid: string[];
+  climate: string | null;
+  budgetSensitivity: string | null;
+  updatedAt: Date | null;
+};
+
 const MAX_FEEDBACK_ROWS = 25;
 
 function asStringArray(value: string | null | undefined, fallback: string[] = []) {
@@ -38,22 +50,34 @@ function clampComfortFashion(value: number | undefined) {
   return Math.max(0, Math.min(100, Math.round(value)));
 }
 
+export function isPersonalizationSchemaError(error: unknown) {
+  const message = String((error as any)?.message || error || "").toLowerCase();
+  return (
+    message.includes("no such table") ||
+    message.includes("no such column") ||
+    message.includes("has no column named") ||
+    message.includes("sqlite_error")
+  );
+}
+
+function defaultProfile(userId: string): StyleProfileResult {
+  return {
+    userId,
+    styleVibes: [],
+    fitPreference: null,
+    comfortFashion: 50,
+    colorsLove: [],
+    colorsAvoid: [],
+    climate: null,
+    budgetSensitivity: null,
+    updatedAt: null,
+  };
+}
+
 export async function getStyleProfile(userId: string) {
   const rows = await db.select().from(user_style_profile).where(eq(user_style_profile.userId, userId)).limit(1);
   const record = rows[0];
-  if (!record) {
-    return {
-      userId,
-      styleVibes: [] as string[],
-      fitPreference: null as string | null,
-      comfortFashion: 50,
-      colorsLove: [] as string[],
-      colorsAvoid: [] as string[],
-      climate: null as string | null,
-      budgetSensitivity: null as string | null,
-      updatedAt: null as Date | null,
-    };
-  }
+  if (!record) return defaultProfile(userId);
 
   return {
     userId,
@@ -117,6 +141,22 @@ export async function recordOutfitFeedback(userId: string, outfitId: string, rat
   });
 
   return { ok: true };
+}
+
+export async function recordOutfitFeedbackLegacySafe(userId: string, outfitId: string, rating: number, reasons: string[] = [], note?: string) {
+  try {
+    return await recordOutfitFeedback(userId, outfitId, rating, reasons, note);
+  } catch (error) {
+    if (!isPersonalizationSchemaError(error)) throw error;
+
+    const normalizedRating = Math.max(1, Math.min(5, Math.round(rating)));
+    await db.$client.execute({
+      sql: "INSERT INTO ratings (id, outfitId, rating, userId, createdAt) VALUES (?, ?, ?, ?, ?)",
+      args: [crypto.randomUUID(), outfitId, normalizedRating, userId, Date.now()],
+    });
+
+    return { ok: true, legacyFallback: true };
+  }
 }
 
 export async function computeBias(userId: string): Promise<FeedbackBias> {

@@ -33,9 +33,28 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.pr_number != '' && format('refs/pull/{0}/head', inputs.pr_number) || github.ref }}
+
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+
+      - name: Validate required inputs/secrets
+        run: |
+          set -euo pipefail
+          if [ -z "${BASE_URL:-}" ]; then
+            echo "Missing required workflow input: base_url"
+            exit 2
+          fi
+          if [ -z "${SMOKE_EMAIL:-}" ] || [ -z "${SMOKE_PASSWORD:-}" ]; then
+            echo "Missing SMOKE_EMAIL/SMOKE_PASSWORD secrets"
+            exit 2
+          fi
+          if [ -z "${PERSONALIZATION_PROOF_TOKEN:-}" ]; then
+            echo "Missing PERSONALIZATION_PROOF_TOKEN secret"
+            exit 2
+          fi
 
       - name: Prepare artifact directory
         run: mkdir -p .codex/artifacts/gate-12
@@ -47,6 +66,7 @@ jobs:
           node .codex/gate-11-proof.mjs 2>&1 | tee .codex/artifacts/gate-12/ci-gate-11-proof.txt
           code=${PIPESTATUS[0]}
           echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          echo "EXIT_CODE=$code" >> .codex/artifacts/gate-12/ci-gate-11-proof.txt
           exit 0
 
       - name: Run Gate 12 proof
@@ -56,6 +76,7 @@ jobs:
           node .codex/gate-12-proof.mjs 2>&1 | tee .codex/artifacts/gate-12/ci-gate-12-proof.txt
           code=${PIPESTATUS[0]}
           echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          echo "EXIT_CODE=$code" >> .codex/artifacts/gate-12/ci-gate-12-proof.txt
           exit 0
 
       - name: Upload proof artifacts

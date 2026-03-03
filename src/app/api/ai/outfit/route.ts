@@ -7,8 +7,8 @@ import { randomUUID } from "crypto";
 import { AUTH_COOKIE_NAME, verifyToken } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { outfits, wardrobe_items } from "@/lib/schema";
-import { hasEntitlement, hasProofTokenBypass } from "@/lib/personalization/entitlements";
-import { buildProfileSummary, computeBias, getStyleProfile } from "@/lib/personalization/profile";
+import { hasEntitlement } from "@/lib/personalization/entitlements";
+import { buildProfileSummary, computeBias, getStyleProfile, isPersonalizationSchemaError } from "@/lib/personalization/profile";
 
 type Category = "top" | "bottom" | "shoes" | "outerwear";
 
@@ -21,7 +21,7 @@ type OutfitItem = {
 };
 
 type OutfitResponse = {
-  outfitId?: string;
+  outfitId?: string | null;
   top: OutfitItem | null;
   bottom: OutfitItem | null;
   shoes: OutfitItem | null;
@@ -38,6 +38,8 @@ type OutfitResponse = {
       recentFeedbackCount: number;
       avgRating: number;
     };
+    outfitStored: boolean;
+    feedbackEnabled: boolean;
   };
 };
 
@@ -75,10 +77,25 @@ export async function POST(request: Request) {
   const body = await request.json();
   const { occasion, weather, mood } = body;
 
-  const personalizationEnabled = (await hasEntitlement(userId, "personalization_memory")) || hasProofTokenBypass(request);
-  const profile = personalizationEnabled ? await getStyleProfile(userId) : null;
-  const biasSignals = personalizationEnabled ? await computeBias(userId) : { formalityBias: 0, avoidColorsCount: 0, recentFeedbackCount: 0, avgRating: 0 };
-  const profileSummary = profile ? buildProfileSummary(profile, biasSignals) : "none";
+  const personalizationEnabled = await hasEntitlement(userId, "personalization_memory", request);
+  let personalizationUsed = false;
+  let profileVersion = "none";
+  let biasSignals = { formalityBias: 0, avoidColorsCount: 0, recentFeedbackCount: 0, avgRating: 0 };
+  let profileSummary = "none";
+
+  if (personalizationEnabled) {
+    try {
+      const profile = await getStyleProfile(userId);
+      biasSignals = await computeBias(userId);
+      profileSummary = buildProfileSummary(profile, biasSignals);
+      profileVersion = profile.updatedAt ? profile.updatedAt.toISOString() : "none";
+      personalizationUsed = true;
+    } catch (error) {
+      if (!isPersonalizationSchemaError(error)) {
+        console.warn("[personalization] profile read unavailable; continuing without memory");
+      }
+    }
+  }
 
   let items: OutfitItem[] = [];
   try {
@@ -107,7 +124,7 @@ export async function POST(request: Request) {
             error: "We’re upgrading your closet. Try again in a moment.",
             code: "DB_MIGRATION_REQUIRED",
           },
-          { status: 503 }
+          { status: 503 },
         );
       }
     } else {
@@ -123,11 +140,14 @@ export async function POST(request: Request) {
         code: "INSUFFICIENT_WARDROBE_METADATA",
         explanation: ["Add or auto-tag at least one top, one bottom, and one pair of shoes."],
       },
-      { status: 400 }
+      { status: 400 },
     );
   }
 
+  const generatedOutfitId = randomUUID();
+
   const fallback: OutfitResponse = {
+    outfitId: null,
     top: pickByCategory(items, "top"),
     bottom: pickByCategory(items, "bottom"),
     shoes: pickByCategory(items, "shoes"),
@@ -135,19 +155,20 @@ export async function POST(request: Request) {
     explanation: [
       "Built from your most recent tagged basics.",
       "This combination balances silhouette and color flexibility.",
-      personalizationEnabled ? `Profile memory applied: ${profileSummary}` : "Upgrade to premium to enable personalization memory.",
+      personalizationUsed ? `Profile memory applied: ${profileSummary}` : "Upgrade to premium to enable personalization memory.",
     ],
     followUpQuestion: "Want this tuned for a specific venue or temperature?",
     source: "fallback",
     meta: {
-      personalizationUsed: personalizationEnabled,
-      profileVersion: profile?.updatedAt ? profile.updatedAt.toISOString() : "none",
+      personalizationUsed,
+      profileVersion,
       biasSignals,
+      outfitStored: false,
+      feedbackEnabled: false,
     },
   };
 
   let result: OutfitResponse = fallback;
-  const generatedOutfitId = randomUUID();
 
   if (process.env.OPENAI_API_KEY) {
     const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -171,7 +192,7 @@ export async function POST(request: Request) {
               weather,
               mood,
               items: compactItems,
-              profileSummary: personalizationEnabled ? profileSummary : "none",
+              profileSummary: personalizationUsed ? profileSummary : "none",
               biasSignals,
             }),
           },
@@ -181,6 +202,7 @@ export async function POST(request: Request) {
       const parsed = JSON.parse(completion.choices[0]?.message?.content || "{}");
       const byId = Object.fromEntries(items.map((i) => [i.id, i]));
       result = {
+        ...fallback,
         top: byId[parsed.topId] ?? fallback.top,
         bottom: byId[parsed.bottomId] ?? fallback.bottom,
         shoes: byId[parsed.shoesId] ?? fallback.shoes,
@@ -191,13 +213,13 @@ export async function POST(request: Request) {
             ? parsed.followUpQuestion
             : fallback.followUpQuestion,
         source: "openai",
-        meta: fallback.meta,
       };
     } catch {
       result = fallback;
     }
   }
 
+  let outfitStored = false;
   try {
     await db.insert(outfits).values({
       id: generatedOutfitId,
@@ -209,7 +231,22 @@ export async function POST(request: Request) {
       explanation: result.explanation.join(" "),
       createdAt: new Date(),
     });
-  } catch {}
+    outfitStored = true;
+  } catch {
+    outfitStored = false;
+  }
 
-  return NextResponse.json({ ...result, outfitId: generatedOutfitId });
+  const response: OutfitResponse = {
+    ...result,
+    outfitId: outfitStored ? generatedOutfitId : null,
+    meta: {
+      personalizationUsed,
+      profileVersion,
+      biasSignals,
+      outfitStored,
+      feedbackEnabled: outfitStored,
+    },
+  };
+
+  return NextResponse.json(response);
 }

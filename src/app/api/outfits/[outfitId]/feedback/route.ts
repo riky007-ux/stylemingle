@@ -1,14 +1,17 @@
+import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 
 import { getUserIdFromRequest } from "@/lib/auth";
-import { hasEntitlement, hasProofTokenBypass } from "@/lib/personalization/entitlements";
-import { recordOutfitFeedback } from "@/lib/personalization/profile";
+import { hasEntitlement } from "@/lib/personalization/entitlements";
+import { isPersonalizationSchemaError, recordOutfitFeedbackLegacySafe } from "@/lib/personalization/profile";
+import { db } from "@/lib/db";
+import { outfits } from "@/lib/schema";
 
 export async function POST(request: Request, { params }: { params: { outfitId: string } }) {
   const userId = getUserIdFromRequest(request);
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const entitled = (await hasEntitlement(userId, "personalization_memory")) || hasProofTokenBypass(request);
+  const entitled = await hasEntitlement(userId, "personalization_memory", request);
   if (!entitled) {
     return NextResponse.json({ error: "Personalization memory is a premium feature" }, { status: 403 });
   }
@@ -19,6 +22,33 @@ export async function POST(request: Request, { params }: { params: { outfitId: s
     return NextResponse.json({ error: "rating must be a number" }, { status: 400 });
   }
 
-  await recordOutfitFeedback(userId, params.outfitId, rating, Array.isArray(body?.reasons) ? body.reasons : [], body?.note);
-  return NextResponse.json({ ok: true });
+  const foundOutfit = await db
+    .select({ id: outfits.id })
+    .from(outfits)
+    .where(and(eq(outfits.id, params.outfitId), eq(outfits.userId, userId)))
+    .limit(1);
+
+  if (!foundOutfit[0]) {
+    return NextResponse.json({ error: "Outfit not found" }, { status: 404 });
+  }
+
+  try {
+    const result = await recordOutfitFeedbackLegacySafe(
+      userId,
+      params.outfitId,
+      rating,
+      Array.isArray(body?.reasons) ? body.reasons : [],
+      body?.note,
+    );
+    return NextResponse.json({ ok: true, legacyFallback: Boolean((result as any)?.legacyFallback) });
+  } catch (error) {
+    if (isPersonalizationSchemaError(error)) {
+      return NextResponse.json(
+        { error: "Feedback temporarily unavailable while database migrates", code: "FEEDBACK_SCHEMA_PENDING" },
+        { status: 503 },
+      );
+    }
+
+    return NextResponse.json({ error: "Failed to save feedback" }, { status: 500 });
+  }
 }
