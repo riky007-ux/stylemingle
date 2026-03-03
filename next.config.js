@@ -6,6 +6,12 @@ const nextConfig = {
         "node_modules/sharp/**/*",
         "node_modules/@img/**/*",
       ],
+      "/api/dev/migrate": [
+        "./drizzle/**",
+      ],
+      "/api/dev/premium": [
+        "./drizzle/**",
+      ],
     },
   },
 };

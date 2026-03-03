@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { createClient } from "@libsql/client";
 import { drizzle } from "drizzle-orm/libsql";
 import { migrate } from "drizzle-orm/libsql/migrator";
+import fs from "fs";
+import path from "path";
 
 import { getUserIdFromRequest } from "@/lib/auth";
 
@@ -52,6 +54,14 @@ export async function POST(req: Request) {
     return jsonError(503, "DB_NOT_CONFIGURED", "Database environment variables are not configured");
   }
 
+  const migrationsFolder = path.join(process.cwd(), "drizzle");
+  const journalPath = path.join(migrationsFolder, "meta", "_journal.json");
+  if (!fs.existsSync(journalPath)) {
+    const message = `Missing migrations journal at ${journalPath}. Add drizzle/** to Next output tracing.`;
+    console.error(`ROOT_CAUSE: dev-migrate MIGRATIONS_ASSET_MISSING ${safeTrim(message)}`);
+    return jsonError(500, "MIGRATIONS_ASSET_MISSING", message);
+  }
+
   const client = createClient({ url, authToken });
   const drizzleDb = drizzle(client);
 
@@ -59,7 +69,7 @@ export async function POST(req: Request) {
   const beforeTables = new Set((before.rows || []).map((r: any) => String(r?.name || "")));
 
   try {
-    await migrate(drizzleDb, { migrationsFolder: "drizzle" });
+    await migrate(drizzleDb, { migrationsFolder });
 
     const after = await client.execute("SELECT name FROM sqlite_master WHERE type='table'");
     const afterTables = new Set((after.rows || []).map((r: any) => String(r?.name || "")));
