@@ -61,6 +61,13 @@ async function parsePayload(req: Request): Promise<PremiumPayload | null> {
   };
 }
 
+
+async function hasUsersIsPremiumColumn() {
+  const result = await db.$client.execute("PRAGMA table_info(users);");
+  const columns = (result.rows || []).map((row: any) => String(row?.name || ""));
+  return columns.includes("isPremium");
+}
+
 async function validateAuthAndToken(req: Request, payload?: PremiumPayload | null) {
   if (isProdLocked()) return { error: jsonError(404, "NOT_FOUND", "Endpoint disabled in production") };
 
@@ -90,6 +97,13 @@ export async function GET(req: Request) {
   }
 
   try {
+    const hasColumn = await hasUsersIsPremiumColumn();
+    if (!hasColumn) {
+      const msg = "Missing users.isPremium column. Run /dashboard/dev/migrate (or apply migration 0003).";
+      logRootCause("PREMIUM_SCHEMA_PENDING", "users.isPremium column missing");
+      return jsonError(503, "PREMIUM_SCHEMA_PENDING", msg);
+    }
+
     const found = await db
       .select({ email: users.email, isPremium: users.isPremium })
       .from(users)
@@ -127,6 +141,13 @@ export async function POST(req: Request) {
   }
 
   try {
+    const hasColumn = await hasUsersIsPremiumColumn();
+    if (!hasColumn) {
+      const msg = "Missing users.isPremium column. Run /dashboard/dev/migrate (or apply migration 0003).";
+      logRootCause("PREMIUM_SCHEMA_PENDING", "users.isPremium column missing");
+      return jsonError(503, "PREMIUM_SCHEMA_PENDING", msg);
+    }
+
     const target = await db.select({ id: users.id, email: users.email }).from(users).where(eq(users.email, email)).limit(1);
     if (!target[0]?.id) {
       return jsonError(404, "USER_NOT_FOUND", "User not found");

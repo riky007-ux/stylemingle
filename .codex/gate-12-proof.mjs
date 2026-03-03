@@ -98,6 +98,22 @@ async function withJar(path, init, jar, setBypassCookie = false) {
 
 
   if (PREMIUM_ADMIN_TOKEN) {
+    const migrate = await withJar(
+      "/api/dev/migrate",
+      {
+        method: "POST",
+        headers: {
+          "x-stylemingle-admin-token": PREMIUM_ADMIN_TOKEN,
+        },
+      },
+      jar,
+    );
+
+    add("Dev migrate endpoint", migrate.status === 200, `POST /api/dev/migrate -> ${migrate.status}`);
+    if (migrate.status >= 500) {
+      rootCause("Dev migration runner failed before premium toggle");
+    }
+
     const premiumToggle = await withJar(
       "/api/dev/premium",
       {
