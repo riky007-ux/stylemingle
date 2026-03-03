@@ -30,6 +30,7 @@ jobs:
       VERCEL_PROTECTION_BYPASS: ${{ inputs.vercel_protection_bypass != '' && inputs.vercel_protection_bypass || secrets.VERCEL_PROTECTION_BYPASS }}
       VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
       PERSONALIZATION_PROOF_TOKEN: ${{ secrets.PERSONALIZATION_PROOF_TOKEN }}
+      PREMIUM_ADMIN_TOKEN: ${{ secrets.PREMIUM_ADMIN_TOKEN }}
 
     steps:
       - name: Checkout

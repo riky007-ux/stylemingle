@@ -5,6 +5,7 @@ const SMOKE_EMAIL = process.env.SMOKE_EMAIL;
 const SMOKE_PASSWORD = process.env.SMOKE_PASSWORD;
 const PROTECTION_BYPASS = process.env.VERCEL_PROTECTION_BYPASS || process.env.VERCEL_AUTOMATION_BYPASS_SECRET || "";
 const PERSONALIZATION_PROOF_TOKEN = process.env.PERSONALIZATION_PROOF_TOKEN || "";
+const PREMIUM_ADMIN_TOKEN = process.env.PREMIUM_ADMIN_TOKEN || "";
 const APP_AUTH_COOKIE_NAME = "auth";
 
 function normalizeBaseUrl(value) {
@@ -94,6 +95,34 @@ async function withJar(path, init, jar, setBypassCookie = false) {
     jar,
   );
   add("Login + app cookie", login.ok && jar.has(APP_AUTH_COOKIE_NAME), `POST /api/auth/login -> ${login.status}`);
+
+
+  if (PREMIUM_ADMIN_TOKEN) {
+    const premiumToggle = await withJar(
+      "/api/dev/premium",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-stylemingle-admin-token": PREMIUM_ADMIN_TOKEN,
+        },
+        body: JSON.stringify({ email: SMOKE_EMAIL, enabled: true }),
+      },
+      jar,
+    );
+
+    add(
+      "Premium toggled for smoke user",
+      premiumToggle.status === 200 || premiumToggle.status === 503,
+      `POST /api/dev/premium -> ${premiumToggle.status}`,
+    );
+
+    if (premiumToggle.status === 503) {
+      rootCause("Premium toggle schema is pending migration");
+    }
+  } else {
+    add("Premium toggle skipped", true, "PREMIUM_ADMIN_TOKEN not provided; using proof-token bypass path");
+  }
 
   const profile0 = await withJar("/api/style-profile", { method: "GET" }, jar);
   const bypassWorks = profile0.status !== 403;

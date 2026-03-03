@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 const VIBES = ["minimalist", "streetwear", "classic", "sporty", "smart-casual"];
 const FITS = ["tailored", "relaxed", "oversized", "athletic"];
@@ -20,46 +20,49 @@ export default function StyleProfilePage() {
   const [colorsLove, setColorsLove] = useState("");
   const [colorsAvoid, setColorsAvoid] = useState("");
 
+  const loadProfile = useCallback(async () => {
+    setSaved("");
+    setError("");
+    setViewState("loading");
+
+    const res = await fetch("/api/style-profile");
+    const data = await res.json().catch(() => null);
+
+    if (res.status === 401) {
+      setViewState("unauthenticated");
+      return;
+    }
+
+    if (res.status === 403) {
+      setViewState("locked");
+      return;
+    }
+
+    if (res.status === 503 && data?.code === "PERSONALIZATION_SCHEMA_PENDING") {
+      setViewState("schemaPending");
+      return;
+    }
+
+    if (!res.ok || !data?.profile) {
+      setError("Failed to load style profile");
+      setViewState("error");
+      return;
+    }
+
+    setStyleVibes(Array.isArray(data.profile.styleVibes) ? data.profile.styleVibes : []);
+    setFitPreference(data.profile.fitPreference || "tailored");
+    setComfortFashion(typeof data.profile.comfortFashion === "number" ? data.profile.comfortFashion : 50);
+    setColorsLove((data.profile.colorsLove || []).join(", "));
+    setColorsAvoid((data.profile.colorsAvoid || []).join(", "));
+    setViewState("ready");
+  }, []);
+
   useEffect(() => {
-    const run = async () => {
-      setViewState("loading");
-      const res = await fetch("/api/style-profile");
-      const data = await res.json().catch(() => null);
-
-      if (res.status === 401) {
-        setViewState("unauthenticated");
-        return;
-      }
-
-      if (res.status === 403) {
-        setViewState("locked");
-        return;
-      }
-
-      if (res.status === 503 && data?.code === "PERSONALIZATION_SCHEMA_PENDING") {
-        setViewState("schemaPending");
-        return;
-      }
-
-      if (!res.ok || !data?.profile) {
-        setError("Failed to load style profile");
-        setViewState("error");
-        return;
-      }
-
-      setStyleVibes(Array.isArray(data.profile.styleVibes) ? data.profile.styleVibes : []);
-      setFitPreference(data.profile.fitPreference || "tailored");
-      setComfortFashion(typeof data.profile.comfortFashion === "number" ? data.profile.comfortFashion : 50);
-      setColorsLove((data.profile.colorsLove || []).join(", "));
-      setColorsAvoid((data.profile.colorsAvoid || []).join(", "));
-      setViewState("ready");
-    };
-
-    run().catch(() => {
+    loadProfile().catch(() => {
       setError("Failed to load style profile");
       setViewState("error");
     });
-  }, []);
+  }, [loadProfile]);
 
   const toggleVibe = (vibe: string) => {
     setStyleVibes((prev) => (prev.includes(vibe) ? prev.filter((v) => v !== vibe) : prev.length >= 3 ? prev : [...prev, vibe]));
@@ -119,6 +122,9 @@ export default function StyleProfilePage() {
         <div className="rounded-xl border border-amber-400 bg-amber-50 p-4" data-testid="style-profile-lock">
           <p className="font-medium">Memory is Premium</p>
           <p className="text-sm text-zinc-700">Upgrade your plan to unlock cross-session style memory and learning.</p>
+          <button onClick={() => loadProfile()} className="mt-3 rounded border px-3 py-1 text-sm">
+            Check again
+          </button>
         </div>
       )}
 
@@ -126,6 +132,9 @@ export default function StyleProfilePage() {
         <div className="rounded-xl border border-blue-300 bg-blue-50 p-4" data-testid="style-profile-schema-pending">
           <p className="font-medium">Style memory is deploying, try again in a moment.</p>
           <p className="text-sm text-zinc-700">We’re finishing a background database update for personalization.</p>
+          <button onClick={() => loadProfile()} className="mt-3 rounded border px-3 py-1 text-sm">
+            Retry
+          </button>
         </div>
       )}
 
