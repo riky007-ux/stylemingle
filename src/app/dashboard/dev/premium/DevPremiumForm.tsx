@@ -25,7 +25,7 @@ export default function DevPremiumForm({ initialEmail = "" }: Props) {
         "Content-Type": "application/json",
         "x-stylemingle-admin-token": token,
       },
-      body: JSON.stringify({ email, enabled }),
+      body: JSON.stringify({ email, enabled, token }),
     });
 
     const data = await res.json().catch(() => null);
@@ -35,20 +35,9 @@ export default function DevPremiumForm({ initialEmail = "" }: Props) {
       return;
     }
 
-    if (res.status === 401) {
-      setError("Please log in to use this tool.");
-    } else if (res.status === 403) {
-      setError("Admin token is missing or invalid.");
-    } else if (res.status === 404) {
-      setError("Dev premium toggle is disabled in this environment.");
-    } else if (res.status === 503 && data?.code === "PREMIUM_SCHEMA_PENDING") {
-      setError("Premium toggle is deploying, try again shortly.");
-    } else if (res.status === 400) {
-      setError(data?.error || "Please enter a valid email and enabled value.");
-    } else {
-      setError(data?.error || "Failed to update premium state.");
-    }
-
+    const code = data?.code || "UNKNOWN";
+    const message = data?.message || data?.error || "Request failed";
+    setError(`HTTP ${res.status} • ${code} • ${message}`);
     setLoading(false);
   };
 

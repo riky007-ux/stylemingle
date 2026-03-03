@@ -147,7 +147,12 @@ async function withJar(path, init, jar, setBypassCookie = false) {
 
   const profile1 = await withJar("/api/style-profile", { method: "GET" }, jar);
   const persisted = profile1.json?.profile?.colorsAvoid?.includes?.("neon green") === true;
-  add("Style profile persistence", profile1.status === 200, `persisted=${persisted}; status=${profile1.status}`);
+  const profileMetaPersisted = profile1.json?.meta?.persisted === true;
+  add(
+    "Style profile persistence",
+    profile1.status === 200 && persisted && profileMetaPersisted,
+    `persisted=${persisted}; metaPersisted=${String(profileMetaPersisted)}; status=${profile1.status}`,
+  );
 
   const gen1 = await withJar(
     "/api/ai/outfit",
