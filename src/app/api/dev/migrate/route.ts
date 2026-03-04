@@ -132,23 +132,21 @@ async function ensurePremiumColumnsExist(client: ReturnType<typeof createClient>
     forcedPremiumSchemaPatchApplied = true;
   }
 
-  if (forcedPremiumSchemaPatchApplied || (hasCamel && hasSnake)) {
-    await client.execute(`
-      UPDATE users
-      SET is_premium = CASE
-        WHEN "isPremium" IS NOT NULL AND "isPremium" != 0 THEN 1
-        ELSE 0
-      END;
-    `).catch(() => null);
+  await client.execute(`
+    UPDATE users
+    SET is_premium = CASE
+      WHEN "isPremium" IS NOT NULL AND "isPremium" != 0 THEN 1
+      ELSE 0
+    END;
+  `).catch(() => null);
 
-    await client.execute(`
-      UPDATE users
-      SET "isPremium" = CASE
-        WHEN is_premium IS NOT NULL AND is_premium != 0 THEN 1
-        ELSE 0
-      END;
-    `).catch(() => null);
-  }
+  await client.execute(`
+    UPDATE users
+    SET "isPremium" = CASE
+      WHEN is_premium IS NOT NULL AND is_premium != 0 THEN 1
+      ELSE 0
+    END;
+  `).catch(() => null);
 
   const after = await detectUsersPremiumSchema(client);
   return { forcedPremiumSchemaPatchApplied, after };
@@ -222,9 +220,23 @@ export async function POST(req: Request) {
   const beforeTablesResult = await client.execute("SELECT name FROM sqlite_master WHERE type='table'");
   const beforeTables = new Set((beforeTablesResult.rows || []).map((r: any) => String(r?.name || "")));
 
+  const warnings: string[] = [];
+  let migrationErrorSummary: string | null = null;
+
   try {
     await migrate(drizzleDb, { migrationsFolder });
+  } catch (error) {
+    const safeMessage = safeTrim((error as any)?.message || error);
+    migrationErrorSummary = safeMessage;
+    if (safeMessage.toLowerCase().includes("already exists")) {
+      warnings.push("BASELINE_SCHEMA_DETECTED");
+      console.warn(`ROOT_CAUSE: dev-migrate BASELINE_SCHEMA_DETECTED ${safeMessage}`);
+    } else {
+      console.error(`ROOT_CAUSE: dev-migrate MIGRATOR_FAILURE ${safeMessage}`);
+    }
+  }
 
+  try {
     const afterTablesResult = await client.execute("SELECT name FROM sqlite_master WHERE type='table'");
     const afterTables = new Set((afterTablesResult.rows || []).map((r: any) => String(r?.name || "")));
     const applied = [...afterTables].filter((name) => name && !beforeTables.has(name));
@@ -247,6 +259,8 @@ export async function POST(req: Request) {
         hasDrizzleMigrationsTable: tablesInfo.hasDrizzleMigrationsTable,
         alreadyUpToDate,
         dbFingerprint,
+        warnings,
+        migrationErrorSummary,
         forcedPremiumSchemaPatchApplied: ensureResult.forcedPremiumSchemaPatchApplied,
         after: {
           hasIsPremium: ensureResult.after.hasIsPremium,
@@ -265,6 +279,8 @@ export async function POST(req: Request) {
       journal,
       tables: tablesInfo.tables,
       hasDrizzleMigrationsTable: tablesInfo.hasDrizzleMigrationsTable,
+      warnings,
+      migrationErrorSummary,
       forcedPremiumSchemaPatchApplied: ensureResult.forcedPremiumSchemaPatchApplied,
       after: {
         hasIsPremium: ensureResult.after.hasIsPremium,
@@ -276,6 +292,10 @@ export async function POST(req: Request) {
   } catch (error) {
     const safeMessage = safeTrim((error as any)?.message || error);
     console.error(`ROOT_CAUSE: dev-migrate DEV_MIGRATE_INTERNAL ${safeMessage}`);
-    return jsonError(500, "DEV_MIGRATE_INTERNAL", "Migration runner failed", { dbFingerprint });
+    return jsonError(500, "DEV_MIGRATE_INTERNAL", "Migration runner failed", {
+      dbFingerprint,
+      warnings,
+      migrationErrorSummary,
+    });
   }
 }

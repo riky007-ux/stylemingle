@@ -8,11 +8,28 @@ type SchemaDiagnostics = {
   detectedPremiumColumnName?: "isPremium" | "is_premium" | null;
 };
 
+type MigrateResponse = {
+  ok?: boolean;
+  applied?: string[];
+  alreadyUpToDate?: boolean;
+  migrationFilesFound?: number;
+  warnings?: string[];
+  forcedPremiumSchemaPatchApplied?: boolean;
+  migrationErrorSummary?: string | null;
+  after?: SchemaDiagnostics;
+  code?: string;
+  message?: string;
+  error?: string;
+};
+
 export default function DevMigrateForm() {
   const [token, setToken] = useState("");
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
+  const [warnings, setWarnings] = useState<string[]>([]);
+  const [forcedPatchApplied, setForcedPatchApplied] = useState<boolean | null>(null);
+  const [migrationErrorSummary, setMigrationErrorSummary] = useState<string | null>(null);
   const [afterSchema, setAfterSchema] = useState<SchemaDiagnostics | null>(null);
   const [diagOutput, setDiagOutput] = useState("");
 
@@ -20,6 +37,9 @@ export default function DevMigrateForm() {
     setLoading(true);
     setStatus("");
     setError("");
+    setWarnings([]);
+    setForcedPatchApplied(null);
+    setMigrationErrorSummary(null);
     setDiagOutput("");
 
     const res = await fetch("/api/dev/migrate", {
@@ -29,18 +49,21 @@ export default function DevMigrateForm() {
       },
     });
 
-    const payload = await res.json().catch(() => null);
+    const payload: MigrateResponse | null = await res.json().catch(() => null);
+    setAfterSchema(payload?.after || null);
+    setWarnings(Array.isArray(payload?.warnings) ? payload!.warnings! : []);
+    setForcedPatchApplied(typeof payload?.forcedPremiumSchemaPatchApplied === "boolean" ? payload.forcedPremiumSchemaPatchApplied : null);
+    setMigrationErrorSummary(typeof payload?.migrationErrorSummary === "string" ? payload.migrationErrorSummary : null);
+
     if (res.ok) {
       const applied = Array.isArray(payload?.applied) ? payload.applied.join(", ") : "";
       setStatus(
         `HTTP ${res.status} • alreadyUpToDate=${String(Boolean(payload?.alreadyUpToDate))} • migrationFilesFound=${String(payload?.migrationFilesFound ?? "?")}${applied ? ` • applied=${applied}` : ""}`,
       );
-      setAfterSchema(payload?.after || null);
       setLoading(false);
       return;
     }
 
-    setAfterSchema(payload?.after || null);
     setError(`HTTP ${res.status} • ${payload?.code || "UNKNOWN"} • ${payload?.message || payload?.error || "Request failed"}`);
     setLoading(false);
   };
@@ -83,6 +106,14 @@ export default function DevMigrateForm() {
 
         {status && <p className="text-sm text-emerald-700">{status}</p>}
         {error && <p className="text-sm text-red-600">{error}</p>}
+
+        {(warnings.length > 0 || migrationErrorSummary || forcedPatchApplied !== null) && (
+          <div className="text-sm text-zinc-700 rounded border bg-zinc-50 p-2" data-testid="migrate-warnings">
+            {warnings.length > 0 && <p>warnings={warnings.join(", ")}</p>}
+            {forcedPatchApplied !== null && <p>forcedPremiumSchemaPatchApplied={String(forcedPatchApplied)}</p>}
+            {migrationErrorSummary && <p>migrationErrorSummary={migrationErrorSummary}</p>}
+          </div>
+        )}
 
         {afterSchema && (
           <p className="text-sm text-zinc-700" data-testid="after-schema-summary">
