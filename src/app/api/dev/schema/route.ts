@@ -7,12 +7,40 @@ export const runtime = "nodejs";
 
 type PremiumColumnName = "isPremium" | "is_premium" | null;
 
-function jsonError(status: number, code: string, message: string) {
-  return NextResponse.json({ ok: false, code, message }, { status });
+function jsonError(status: number, code: string, message: string, extras: Record<string, unknown> = {}) {
+  return NextResponse.json({ ok: false, code, message, ...extras }, { status });
 }
 
 function endpointEnabled() {
   return process.env.VERCEL_ENV !== "production" || process.env.ALLOW_DEV_MIGRATE_ENDPOINT === "true";
+}
+
+function makeDbFingerprint() {
+  const rawUrl = process.env.TURSO_DATABASE_URL || "";
+  let dbHost = "unknown";
+  let dbNameHint = "unknown";
+
+  if (rawUrl) {
+    try {
+      const parsed = new URL(rawUrl);
+      dbHost = parsed.host || "unknown";
+      const pathName = (parsed.pathname || "").replace(/^\/+/, "");
+      const basis = pathName || parsed.host || "unknown";
+      dbNameHint = basis.slice(-6) || "unknown";
+    } catch {
+      dbHost = "invalid-url";
+      dbNameHint = rawUrl.slice(-6) || "unknown";
+    }
+  }
+
+  return {
+    dbHost,
+    dbNameHint,
+    envPresent: {
+      hasTursoUrl: Boolean(process.env.TURSO_DATABASE_URL),
+      hasTursoToken: Boolean(process.env.TURSO_AUTH_TOKEN),
+    },
+  };
 }
 
 function normalizeTableName(value: string | null) {
@@ -52,6 +80,7 @@ function checkAuthAndToken(req: Request) {
   if (!expectedToken) return { error: jsonError(503, "ADMIN_TOKEN_NOT_CONFIGURED", "Admin token not configured") };
 
   const providedToken = req.headers.get("x-stylemingle-admin-token") || "";
+  if (!providedToken) return { error: jsonError(403, "ADMIN_TOKEN_MISSING", "Admin token header is required") };
   if (providedToken !== expectedToken) return { error: jsonError(403, "INVALID_ADMIN_TOKEN", "Admin token is invalid") };
 
   return { userId };
@@ -61,6 +90,7 @@ export async function GET(req: Request) {
   const auth = checkAuthAndToken(req);
   if ("error" in auth) return auth.error;
 
+  const dbFingerprint = makeDbFingerprint();
   const url = new URL(req.url);
   const mode = String(url.searchParams.get("mode") || "").trim();
 
@@ -71,12 +101,13 @@ export async function GET(req: Request) {
         ok: true,
         mode: "list-tables",
         tables: (tables.rows || []).map((row: any) => String(row?.name || "")).filter(Boolean),
+        dbFingerprint,
       });
     }
 
     const table = normalizeTableName(url.searchParams.get("table"));
     if (!table) {
-      return jsonError(400, "INVALID_INPUT", "table query parameter is required (or mode=list-tables)");
+      return jsonError(400, "INVALID_INPUT", "table query parameter is required (or mode=list-tables)", { dbFingerprint });
     }
 
     const pragma = await db.$client.execute(`PRAGMA table_info(${table});`);
@@ -91,8 +122,9 @@ export async function GET(req: Request) {
       hasIsPremium: table === "users" ? Boolean(detectedPremiumColumnName) : false,
       detectedPremiumColumnName,
       dbMigrations,
+      dbFingerprint,
     });
   } catch {
-    return jsonError(500, "DEV_SCHEMA_INTERNAL", "Failed to inspect schema");
+    return jsonError(500, "DEV_SCHEMA_INTERNAL", "Failed to inspect schema", { dbFingerprint });
   }
 }

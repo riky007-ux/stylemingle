@@ -28,6 +28,34 @@ function safeTrim(value: unknown, max = 180) {
   return String(value || "").replace(/\s+/g, " ").slice(0, max);
 }
 
+function makeDbFingerprint() {
+  const rawUrl = process.env.TURSO_DATABASE_URL || "";
+  let dbHost = "unknown";
+  let dbNameHint = "unknown";
+
+  if (rawUrl) {
+    try {
+      const parsed = new URL(rawUrl);
+      dbHost = parsed.host || "unknown";
+      const pathName = (parsed.pathname || "").replace(/^\/+/, "");
+      const basis = pathName || parsed.host || "unknown";
+      dbNameHint = basis.slice(-6) || "unknown";
+    } catch {
+      dbHost = "invalid-url";
+      dbNameHint = rawUrl.slice(-6) || "unknown";
+    }
+  }
+
+  return {
+    dbHost,
+    dbNameHint,
+    envPresent: {
+      hasTursoUrl: Boolean(process.env.TURSO_DATABASE_URL),
+      hasTursoToken: Boolean(process.env.TURSO_AUTH_TOKEN),
+    },
+  };
+}
+
 function isAuthOrTokenInvalid(req: Request) {
   const expectedToken = process.env.PREMIUM_ADMIN_TOKEN;
   if (!expectedToken) {
@@ -35,7 +63,10 @@ function isAuthOrTokenInvalid(req: Request) {
   }
 
   const providedToken = req.headers.get("x-stylemingle-admin-token");
-  if (!providedToken || providedToken !== expectedToken) {
+  if (!providedToken) {
+    return { error: jsonError(403, "ADMIN_TOKEN_MISSING", "Admin token header is required") };
+  }
+  if (providedToken !== expectedToken) {
     return { error: jsonError(403, "INVALID_ADMIN_TOKEN", "Admin token is invalid") };
   }
 
@@ -62,6 +93,15 @@ function readJournalSummary(journalPath: string): JournalSummary {
   }
 }
 
+async function readTables(client: ReturnType<typeof createClient>) {
+  const tableRes = await client.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name ASC");
+  const tables = (tableRes.rows || []).map((row: any) => String(row?.name || "")).filter(Boolean);
+  return {
+    tables,
+    hasDrizzleMigrationsTable: tables.includes("__drizzle_migrations") || tables.some((table) => table.includes("drizzle") && table.includes("migration")),
+  };
+}
+
 async function detectUsersPremiumSchema(client: ReturnType<typeof createClient>) {
   const result = await client.execute("PRAGMA table_info(users);");
   const columns = (result.rows || []).map((row: any) => String(row?.name || ""));
@@ -75,10 +115,48 @@ async function detectUsersPremiumSchema(client: ReturnType<typeof createClient>)
   };
 }
 
+async function ensurePremiumColumnsExist(client: ReturnType<typeof createClient>) {
+  const before = await detectUsersPremiumSchema(client);
+  let forcedPremiumSchemaPatchApplied = false;
+
+  const hasCamel = before.columns.includes("isPremium");
+  const hasSnake = before.columns.includes("is_premium");
+
+  if (!hasCamel) {
+    await client.execute('ALTER TABLE users ADD COLUMN "isPremium" INTEGER NOT NULL DEFAULT 0;').catch(() => null);
+    forcedPremiumSchemaPatchApplied = true;
+  }
+
+  if (!hasSnake) {
+    await client.execute("ALTER TABLE users ADD COLUMN is_premium INTEGER NOT NULL DEFAULT 0;").catch(() => null);
+    forcedPremiumSchemaPatchApplied = true;
+  }
+
+  if (forcedPremiumSchemaPatchApplied || (hasCamel && hasSnake)) {
+    await client.execute(`
+      UPDATE users
+      SET is_premium = CASE
+        WHEN "isPremium" IS NOT NULL AND "isPremium" != 0 THEN 1
+        ELSE 0
+      END;
+    `).catch(() => null);
+
+    await client.execute(`
+      UPDATE users
+      SET "isPremium" = CASE
+        WHEN is_premium IS NOT NULL AND is_premium != 0 THEN 1
+        ELSE 0
+      END;
+    `).catch(() => null);
+  }
+
+  const after = await detectUsersPremiumSchema(client);
+  return { forcedPremiumSchemaPatchApplied, after };
+}
+
 async function readDrizzleMigrations(client: ReturnType<typeof createClient>) {
-  const tables = await client.execute("SELECT name FROM sqlite_master WHERE type='table'");
-  const names = (tables.rows || []).map((row: any) => String(row?.name || ""));
-  const tableName = names.find((n) => n === "__drizzle_migrations") || names.find((n) => n.includes("drizzle") && n.includes("migration"));
+  const { tables } = await readTables(client);
+  const tableName = tables.find((n) => n === "__drizzle_migrations") || tables.find((n) => n.includes("drizzle") && n.includes("migration"));
   if (!tableName) return [];
 
   const rows = await client.execute(`SELECT * FROM ${tableName} ORDER BY rowid DESC LIMIT 20`);
@@ -104,8 +182,9 @@ export async function POST(req: Request) {
 
   const url = process.env.TURSO_DATABASE_URL;
   const authToken = process.env.TURSO_AUTH_TOKEN;
+  const dbFingerprint = makeDbFingerprint();
   if (!url || !authToken) {
-    return jsonError(503, "DB_NOT_CONFIGURED", "Database environment variables are not configured");
+    return jsonError(503, "DB_NOT_CONFIGURED", "Database environment variables are not configured", { dbFingerprint });
   }
 
   const migrationsFolder = path.join(process.cwd(), "drizzle");
@@ -113,7 +192,7 @@ export async function POST(req: Request) {
   if (!fs.existsSync(journalPath)) {
     const message = `Missing migrations journal at ${journalPath}. Add drizzle/** to Next output tracing.`;
     console.error(`ROOT_CAUSE: dev-migrate MIGRATIONS_ASSET_MISSING ${safeTrim(message)}`);
-    return jsonError(500, "MIGRATIONS_ASSET_MISSING", message);
+    return jsonError(500, "MIGRATIONS_ASSET_MISSING", message, { dbFingerprint });
   }
 
   const { allFiles, sqlFiles } = listMigrationFiles(migrationsFolder);
@@ -121,6 +200,7 @@ export async function POST(req: Request) {
     return jsonError(500, "MIGRATIONS_NOT_FOUND", `No migration SQL files found under ${migrationsFolder}`, {
       migrationsFolder,
       filesSeen: allFiles,
+      dbFingerprint,
     });
   }
 
@@ -132,6 +212,7 @@ export async function POST(req: Request) {
       migrationFilesFound: sqlFiles.length,
       latestMigrationName: sqlFiles[sqlFiles.length - 1] || null,
       journal,
+      dbFingerprint,
     });
   }
 
@@ -147,22 +228,29 @@ export async function POST(req: Request) {
     const afterTablesResult = await client.execute("SELECT name FROM sqlite_master WHERE type='table'");
     const afterTables = new Set((afterTablesResult.rows || []).map((r: any) => String(r?.name || "")));
     const applied = [...afterTables].filter((name) => name && !beforeTables.has(name));
-
-    const afterSchema = await detectUsersPremiumSchema(client);
-    const dbMigrations = await readDrizzleMigrations(client);
     const alreadyUpToDate = applied.length === 0;
 
-    if (alreadyUpToDate && !afterSchema.hasIsPremium) {
+    const ensureResult = await ensurePremiumColumnsExist(client);
+    const tablesInfo = await readTables(client);
+    const dbMigrations = await readDrizzleMigrations(client);
+
+    if (!ensureResult.after.hasIsPremium) {
       const message =
-        "Migrations reported up-to-date but users premium column is still missing. Check drizzle asset bundling/tracing and __drizzle_migrations records.";
+        "Migrations reported success but users premium column is still missing. Check DB target, permissions, and migration execution path.";
       console.error(`ROOT_CAUSE: dev-migrate MIGRATIONS_DID_NOT_PRODUCE_SCHEMA ${safeTrim(message)}`);
       return jsonError(500, "MIGRATIONS_DID_NOT_PRODUCE_SCHEMA", message, {
         migrationFilesFound: sqlFiles.length,
         latestMigrationName: sqlFiles[sqlFiles.length - 1] || null,
+        journalEntriesCount: journal.entryCount,
         journal,
+        tablesFound: tablesInfo.tables,
+        hasDrizzleMigrationsTable: tablesInfo.hasDrizzleMigrationsTable,
+        alreadyUpToDate,
+        dbFingerprint,
+        forcedPremiumSchemaPatchApplied: ensureResult.forcedPremiumSchemaPatchApplied,
         after: {
-          hasIsPremium: afterSchema.hasIsPremium,
-          detectedPremiumColumnName: afterSchema.detectedPremiumColumnName,
+          hasIsPremium: ensureResult.after.hasIsPremium,
+          detectedPremiumColumnName: ensureResult.after.detectedPremiumColumnName,
         },
         dbMigrations,
       });
@@ -175,31 +263,19 @@ export async function POST(req: Request) {
       migrationFilesFound: sqlFiles.length,
       latestMigrationName: sqlFiles[sqlFiles.length - 1] || null,
       journal,
+      tables: tablesInfo.tables,
+      hasDrizzleMigrationsTable: tablesInfo.hasDrizzleMigrationsTable,
+      forcedPremiumSchemaPatchApplied: ensureResult.forcedPremiumSchemaPatchApplied,
       after: {
-        hasIsPremium: afterSchema.hasIsPremium,
-        detectedPremiumColumnName: afterSchema.detectedPremiumColumnName,
+        hasIsPremium: ensureResult.after.hasIsPremium,
+        detectedPremiumColumnName: ensureResult.after.detectedPremiumColumnName,
       },
       dbMigrations,
+      dbFingerprint,
     });
   } catch (error) {
     const safeMessage = safeTrim((error as any)?.message || error);
-    if (safeMessage.toLowerCase().includes("already exists")) {
-      const afterSchema = await detectUsersPremiumSchema(client).catch(() => ({ hasIsPremium: false, detectedPremiumColumnName: null }));
-      return NextResponse.json({
-        ok: true,
-        applied: [],
-        alreadyUpToDate: true,
-        migrationFilesFound: sqlFiles.length,
-        latestMigrationName: sqlFiles[sqlFiles.length - 1] || null,
-        journal,
-        after: {
-          hasIsPremium: afterSchema.hasIsPremium,
-          detectedPremiumColumnName: afterSchema.detectedPremiumColumnName,
-        },
-      });
-    }
-
     console.error(`ROOT_CAUSE: dev-migrate DEV_MIGRATE_INTERNAL ${safeMessage}`);
-    return jsonError(500, "DEV_MIGRATE_INTERNAL", "Migration runner failed");
+    return jsonError(500, "DEV_MIGRATE_INTERNAL", "Migration runner failed", { dbFingerprint });
   }
 }
