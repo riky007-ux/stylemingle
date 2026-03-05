@@ -109,9 +109,19 @@ async function withJar(path, init, jar, setBypassCookie = false) {
       jar,
     );
 
-    add("Dev migrate endpoint", migrate.status === 200, `POST /api/dev/migrate -> ${migrate.status}`);
-    if (migrate.status >= 500) {
-      rootCause("Dev migration runner failed before premium toggle");
+    const migrateSchemaReady =
+      migrate.status === 200 &&
+      migrate.json?.after?.hasIsPremium === true &&
+      migrate.json?.after?.hasStyleProfileTable === true &&
+      migrate.json?.after?.hasFeedbackColumns === true;
+
+    add(
+      "Dev migrate endpoint",
+      migrateSchemaReady,
+      `POST /api/dev/migrate -> ${migrate.status}; premium=${String(migrate.json?.after?.hasIsPremium)}; style=${String(migrate.json?.after?.hasStyleProfileTable)}; feedback=${String(migrate.json?.after?.hasFeedbackColumns)}`,
+    );
+    if (!migrateSchemaReady) {
+      rootCause("Dev migration runner did not produce complete Gate 12 schema");
     }
 
     const premiumToggle = await withJar(
@@ -158,8 +168,8 @@ async function withJar(path, init, jar, setBypassCookie = false) {
     },
     jar,
   );
-  add("PATCH style profile", patch.status === 200 || patch.status === 503, `PATCH /api/style-profile -> ${patch.status}`);
-  if (patch.status === 503) rootCause("Style profile PATCH unavailable while migration is pending");
+  add("PATCH style profile", patch.status === 200, `PATCH /api/style-profile -> ${patch.status}`);
+  if (patch.status !== 200) rootCause("Style profile PATCH failed");
 
   const profile1 = await withJar("/api/style-profile", { method: "GET" }, jar);
   const persisted = profile1.json?.profile?.colorsAvoid?.includes?.("neon green") === true;
@@ -203,10 +213,9 @@ async function withJar(path, init, jar, setBypassCookie = false) {
       jar,
     );
 
-    feedbackOk = fb.status === 200 || fb.status === 503;
+    feedbackOk = fb.status === 200;
     add("Feedback saved", feedbackOk, `POST /api/outfits/:id/feedback -> ${fb.status}`);
-    if (fb.status === 503) rootCause("Feedback endpoint temporarily unavailable during ratings migration");
-    if (fb.status === 404) rootCause("Feedback outfitId was not persisted before submission");
+    if (fb.status !== 200) rootCause("Feedback endpoint failed");
   } else {
     add("Feedback skipped when outfit not stored", true, "Skipped feedback because meta.outfitStored=false");
   }

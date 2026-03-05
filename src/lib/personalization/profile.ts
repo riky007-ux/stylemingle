@@ -60,6 +60,21 @@ export function isPersonalizationSchemaError(error: unknown) {
   );
 }
 
+export async function getTableColumns(table: string) {
+  const result = await db.$client.execute(`PRAGMA table_info(${table});`);
+  return (result.rows || []).map((row: any) => String(row?.name || "")).filter(Boolean);
+}
+
+export async function hasStyleProfileTable() {
+  const tables = await db.$client.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='user_style_profile' LIMIT 1");
+  return Boolean((tables.rows || [])[0]);
+}
+
+export async function hasFeedbackColumns() {
+  const columns = await getTableColumns("ratings");
+  return columns.includes("reasons") && columns.includes("note");
+}
+
 function defaultProfile(userId: string): StyleProfileResult {
   return {
     userId,

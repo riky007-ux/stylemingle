@@ -102,9 +102,13 @@ async function readTables(client: ReturnType<typeof createClient>) {
   };
 }
 
+async function getTableColumns(client: ReturnType<typeof createClient>, table: string) {
+  const result = await client.execute(`PRAGMA table_info(${table});`);
+  return (result.rows || []).map((row: any) => String(row?.name || "")).filter(Boolean);
+}
+
 async function detectUsersPremiumSchema(client: ReturnType<typeof createClient>) {
-  const result = await client.execute("PRAGMA table_info(users);");
-  const columns = (result.rows || []).map((row: any) => String(row?.name || ""));
+  const columns = await getTableColumns(client, "users");
   let detectedPremiumColumnName: PremiumColumnName = null;
   if (columns.includes("isPremium")) detectedPremiumColumnName = "isPremium";
   if (!detectedPremiumColumnName && columns.includes("is_premium")) detectedPremiumColumnName = "is_premium";
@@ -119,15 +123,12 @@ async function ensurePremiumColumnsExist(client: ReturnType<typeof createClient>
   const before = await detectUsersPremiumSchema(client);
   let forcedPremiumSchemaPatchApplied = false;
 
-  const hasCamel = before.columns.includes("isPremium");
-  const hasSnake = before.columns.includes("is_premium");
-
-  if (!hasCamel) {
+  if (!before.columns.includes("isPremium")) {
     await client.execute('ALTER TABLE users ADD COLUMN "isPremium" INTEGER NOT NULL DEFAULT 0;').catch(() => null);
     forcedPremiumSchemaPatchApplied = true;
   }
 
-  if (!hasSnake) {
+  if (!before.columns.includes("is_premium")) {
     await client.execute("ALTER TABLE users ADD COLUMN is_premium INTEGER NOT NULL DEFAULT 0;").catch(() => null);
     forcedPremiumSchemaPatchApplied = true;
   }
@@ -148,8 +149,61 @@ async function ensurePremiumColumnsExist(client: ReturnType<typeof createClient>
     END;
   `).catch(() => null);
 
-  const after = await detectUsersPremiumSchema(client);
-  return { forcedPremiumSchemaPatchApplied, after };
+  return { forcedPremiumSchemaPatchApplied, after: await detectUsersPremiumSchema(client) };
+}
+
+async function ensureStyleProfileSchema(client: ReturnType<typeof createClient>) {
+  let forcedStyleProfileSchemaPatchApplied = false;
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS user_style_profile (
+      userId TEXT PRIMARY KEY NOT NULL,
+      styleVibes TEXT NOT NULL DEFAULT '[]',
+      fitPreference TEXT,
+      comfortFashion INTEGER NOT NULL DEFAULT 50,
+      colorsLove TEXT NOT NULL DEFAULT '[]',
+      colorsAvoid TEXT NOT NULL DEFAULT '[]',
+      climate TEXT,
+      budgetSensitivity TEXT,
+      updatedAt INTEGER NOT NULL,
+      FOREIGN KEY (userId) REFERENCES users(id)
+    );
+  `).catch(() => null);
+
+  const columns = await getTableColumns(client, "user_style_profile").catch(() => [] as string[]);
+  const required = ["userId", "styleVibes", "fitPreference", "comfortFashion", "colorsLove", "colorsAvoid", "climate", "budgetSensitivity", "updatedAt"];
+
+  if (columns.length > 0) {
+    if (!columns.includes("climate")) {
+      await client.execute("ALTER TABLE user_style_profile ADD COLUMN climate TEXT;").catch(() => null);
+      forcedStyleProfileSchemaPatchApplied = true;
+    }
+    if (!columns.includes("budgetSensitivity")) {
+      await client.execute("ALTER TABLE user_style_profile ADD COLUMN budgetSensitivity TEXT;").catch(() => null);
+      forcedStyleProfileSchemaPatchApplied = true;
+    }
+  }
+
+  const afterColumns = await getTableColumns(client, "user_style_profile").catch(() => [] as string[]);
+  const hasStyleProfileTable = required.every((c) => afterColumns.includes(c));
+  return { forcedStyleProfileSchemaPatchApplied, hasStyleProfileTable };
+}
+
+async function ensureFeedbackSchema(client: ReturnType<typeof createClient>) {
+  let forcedFeedbackSchemaPatchApplied = false;
+  const columns = await getTableColumns(client, "ratings").catch(() => [] as string[]);
+  if (!columns.includes("reasons")) {
+    await client.execute("ALTER TABLE ratings ADD COLUMN reasons TEXT;").catch(() => null);
+    forcedFeedbackSchemaPatchApplied = true;
+  }
+  if (!columns.includes("note")) {
+    await client.execute("ALTER TABLE ratings ADD COLUMN note TEXT;").catch(() => null);
+    forcedFeedbackSchemaPatchApplied = true;
+  }
+  const afterColumns = await getTableColumns(client, "ratings").catch(() => [] as string[]);
+  return {
+    forcedFeedbackSchemaPatchApplied,
+    hasFeedbackColumns: afterColumns.includes("reasons") && afterColumns.includes("note"),
+  };
 }
 
 async function readDrizzleMigrations(client: ReturnType<typeof createClient>) {
@@ -166,14 +220,10 @@ async function readDrizzleMigrations(client: ReturnType<typeof createClient>) {
 }
 
 export async function POST(req: Request) {
-  if (!endpointEnabled()) {
-    return jsonError(404, "NOT_FOUND", "Endpoint disabled in production");
-  }
+  if (!endpointEnabled()) return jsonError(404, "NOT_FOUND", "Endpoint disabled in production");
 
   const userId = getUserIdFromRequest(req);
-  if (!userId) {
-    return jsonError(401, "NOT_AUTHENTICATED", "You must be logged in");
-  }
+  if (!userId) return jsonError(401, "NOT_AUTHENTICATED", "You must be logged in");
 
   const auth = isAuthOrTokenInvalid(req);
   if ("error" in auth) return auth.error;
@@ -242,15 +292,24 @@ export async function POST(req: Request) {
     const applied = [...afterTables].filter((name) => name && !beforeTables.has(name));
     const alreadyUpToDate = applied.length === 0;
 
-    const ensureResult = await ensurePremiumColumnsExist(client);
+    const premiumEnsure = await ensurePremiumColumnsExist(client);
+    const styleEnsure = await ensureStyleProfileSchema(client);
+    const feedbackEnsure = await ensureFeedbackSchema(client);
     const tablesInfo = await readTables(client);
     const dbMigrations = await readDrizzleMigrations(client);
 
-    if (!ensureResult.after.hasIsPremium) {
-      const message =
-        "Migrations reported success but users premium column is still missing. Check DB target, permissions, and migration execution path.";
-      console.error(`ROOT_CAUSE: dev-migrate MIGRATIONS_DID_NOT_PRODUCE_SCHEMA ${safeTrim(message)}`);
-      return jsonError(500, "MIGRATIONS_DID_NOT_PRODUCE_SCHEMA", message, {
+    const after = {
+      hasIsPremium: premiumEnsure.after.hasIsPremium,
+      detectedPremiumColumnName: premiumEnsure.after.detectedPremiumColumnName,
+      hasStyleProfileTable: styleEnsure.hasStyleProfileTable,
+      hasFeedbackColumns: feedbackEnsure.hasFeedbackColumns,
+    };
+
+    const gate12Ready = after.hasIsPremium && after.hasStyleProfileTable && after.hasFeedbackColumns;
+    if (!gate12Ready) {
+      const message = "Migrations did not produce complete Gate 12 schema. Check DB target, permissions, and migration execution path.";
+      console.error(`ROOT_CAUSE: dev-migrate MIGRATIONS_DID_NOT_PRODUCE_GATE12_SCHEMA ${safeTrim(message)}`);
+      return jsonError(500, "MIGRATIONS_DID_NOT_PRODUCE_GATE12_SCHEMA", message, {
         migrationFilesFound: sqlFiles.length,
         latestMigrationName: sqlFiles[sqlFiles.length - 1] || null,
         journalEntriesCount: journal.entryCount,
@@ -261,11 +320,10 @@ export async function POST(req: Request) {
         dbFingerprint,
         warnings,
         migrationErrorSummary,
-        forcedPremiumSchemaPatchApplied: ensureResult.forcedPremiumSchemaPatchApplied,
-        after: {
-          hasIsPremium: ensureResult.after.hasIsPremium,
-          detectedPremiumColumnName: ensureResult.after.detectedPremiumColumnName,
-        },
+        forcedPremiumSchemaPatchApplied: premiumEnsure.forcedPremiumSchemaPatchApplied,
+        forcedStyleProfileSchemaPatchApplied: styleEnsure.forcedStyleProfileSchemaPatchApplied,
+        forcedFeedbackSchemaPatchApplied: feedbackEnsure.forcedFeedbackSchemaPatchApplied,
+        after,
         dbMigrations,
       });
     }
@@ -281,11 +339,10 @@ export async function POST(req: Request) {
       hasDrizzleMigrationsTable: tablesInfo.hasDrizzleMigrationsTable,
       warnings,
       migrationErrorSummary,
-      forcedPremiumSchemaPatchApplied: ensureResult.forcedPremiumSchemaPatchApplied,
-      after: {
-        hasIsPremium: ensureResult.after.hasIsPremium,
-        detectedPremiumColumnName: ensureResult.after.detectedPremiumColumnName,
-      },
+      forcedPremiumSchemaPatchApplied: premiumEnsure.forcedPremiumSchemaPatchApplied,
+      forcedStyleProfileSchemaPatchApplied: styleEnsure.forcedStyleProfileSchemaPatchApplied,
+      forcedFeedbackSchemaPatchApplied: feedbackEnsure.forcedFeedbackSchemaPatchApplied,
+      after,
       dbMigrations,
       dbFingerprint,
     });
