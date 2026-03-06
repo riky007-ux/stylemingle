@@ -12,12 +12,25 @@ type OutfitItem = {
 };
 
 type OutfitResult = {
+  outfitId?: string;
   top: OutfitItem | null;
   bottom: OutfitItem | null;
   shoes: OutfitItem | null;
   outerwear: OutfitItem | null;
   explanation: string[] | string;
   followUpQuestion?: string;
+  meta?: {
+    personalizationUsed: boolean;
+    profileVersion: string;
+    biasSignals: {
+      formalityBias: number;
+      avoidColorsCount: number;
+      recentFeedbackCount: number;
+      avgRating: number;
+    };
+    outfitStored?: boolean;
+    feedbackEnabled?: boolean;
+  };
 };
 
 type WardrobeItem = {
@@ -36,6 +49,12 @@ export default function OutfitsPage() {
   const [error, setError] = useState("");
   const [preflightStatus, setPreflightStatus] = useState("");
   const [loading, setLoading] = useState(false);
+  const [feedbackRating, setFeedbackRating] = useState(4);
+  const [feedbackReasons, setFeedbackReasons] = useState<string[]>([]);
+  const [feedbackNote, setFeedbackNote] = useState("");
+  const [feedbackSaved, setFeedbackSaved] = useState("");
+
+  const reasonOptions = ["too-formal", "too-casual", "color-clash", "great-fit", "great-colors"];
 
   const explanationLines = useMemo(() => {
     if (!result) return [];
@@ -138,6 +157,7 @@ export default function OutfitsPage() {
 
       localStorage.setItem("sm:latestOutfit", JSON.stringify(payload));
       setResult(data);
+      setFeedbackSaved("");
     } catch (err) {
       console.error(err);
       setError("Failed to generate");
@@ -145,6 +165,24 @@ export default function OutfitsPage() {
       setLoading(false);
       setPreflightStatus("");
     }
+  };
+
+  const submitFeedback = async () => {
+    if (!result?.outfitId) return;
+    const res = await fetch(`/api/outfits/${result.outfitId}/feedback`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rating: feedbackRating, reasons: feedbackReasons, note: feedbackNote }),
+    });
+    if (res.ok) {
+      setFeedbackSaved("Feedback saved");
+      return;
+    }
+    setFeedbackSaved("Feedback unavailable (Premium required)");
+  };
+
+  const toggleReason = (reason: string) => {
+    setFeedbackReasons((prev) => (prev.includes(reason) ? prev.filter((r) => r !== reason) : [...prev, reason]));
   };
 
   return (
@@ -189,6 +227,46 @@ export default function OutfitsPage() {
             ))}
           </ul>
           <p className="text-sm mt-2">{result.followUpQuestion}</p>
+
+          {result.meta && (
+            <p className="mt-2 text-xs text-zinc-500" data-testid="outfit-personalization-meta">
+              Personalization: {String(result.meta.personalizationUsed)} · Feedback count: {result.meta.biasSignals.recentFeedbackCount}
+            </p>
+          )}
+
+          {result?.meta?.feedbackEnabled && result?.outfitId && result?.meta?.outfitStored ? (
+            <div className="mt-4 border-t pt-4" data-testid="outfit-feedback-form">
+              <h3 className="font-medium mb-2">Rate this outfit</h3>
+              <div className="flex gap-2 mb-2">
+                {[1, 2, 3, 4, 5].map((n) => (
+                  <button key={n} onClick={() => setFeedbackRating(n)} className={`px-2 py-1 border rounded ${feedbackRating === n ? "bg-slate-900 text-white" : ""}`}>
+                    {n}
+                  </button>
+                ))}
+              </div>
+              <div className="flex flex-wrap gap-2 mb-2">
+                {reasonOptions.map((reason) => (
+                  <button key={reason} onClick={() => toggleReason(reason)} className={`text-xs rounded-full px-3 py-1 border ${feedbackReasons.includes(reason) ? "bg-slate-900 text-white" : ""}`}>
+                    {reason}
+                  </button>
+                ))}
+              </div>
+              <input
+                value={feedbackNote}
+                onChange={(e) => setFeedbackNote(e.target.value)}
+                className="w-full border rounded p-2 text-sm"
+                placeholder="Optional note"
+              />
+              <button onClick={submitFeedback} className="mt-2 rounded-lg border px-3 py-2 text-sm">
+                Submit feedback
+              </button>
+              {feedbackSaved && <p className="text-xs mt-2 text-zinc-600">{feedbackSaved}</p>}
+            </div>
+          ) : (
+            <p className="mt-4 text-xs text-zinc-500" data-testid="outfit-feedback-locked">
+              Feedback learning is Premium.
+            </p>
+          )}
 
           <button onClick={() => router.push("/dashboard/avatar?outfit=latest")} className="mt-4 rounded-lg border px-3 py-2">
             View on Avatar

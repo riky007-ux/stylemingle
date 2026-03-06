@@ -29,6 +29,8 @@ jobs:
       SMOKE_PASSWORD: ${{ secrets.SMOKE_PASSWORD }}
       VERCEL_PROTECTION_BYPASS: ${{ inputs.vercel_protection_bypass != '' && inputs.vercel_protection_bypass || secrets.VERCEL_PROTECTION_BYPASS }}
       VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+      PERSONALIZATION_PROOF_TOKEN: ${{ secrets.PERSONALIZATION_PROOF_TOKEN }}
+      PREMIUM_ADMIN_TOKEN: ${{ secrets.PREMIUM_ADMIN_TOKEN }}
 
     steps:
       - name: Checkout
@@ -80,6 +82,25 @@ jobs:
           echo "EXIT_CODE=$code" >> .codex/artifacts/gate-11/ci-gate-11-proof.txt
           exit 0
 
+      - name: Run Gate 12 proof (if present)
+        id: gate12
+        run: |
+          set +e
+          if [ ! -f .codex/gate-12-proof.mjs ]; then
+            echo "INFO: gate-12-proof.mjs not present; skipping" | tee .codex/artifacts/gate-11/ci-gate-12-proof.txt
+            echo "ran=false" >> "$GITHUB_OUTPUT"
+            echo "exit_code=0" >> "$GITHUB_OUTPUT"
+            echo "EXIT_CODE=0" >> .codex/artifacts/gate-11/ci-gate-12-proof.txt
+            exit 0
+          fi
+
+          node .codex/gate-12-proof.mjs 2>&1 | tee .codex/artifacts/gate-11/ci-gate-12-proof.txt
+          code=${PIPESTATUS[0]}
+          echo "ran=true" >> "$GITHUB_OUTPUT"
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          echo "EXIT_CODE=$code" >> .codex/artifacts/gate-11/ci-gate-12-proof.txt
+          exit 0
+
       - name: Run Gate 10.2x smoke
         id: gate102x
         run: |
@@ -98,6 +119,7 @@ jobs:
           path: |
             .codex/artifacts/gate-11/ci-gate-11-proof.txt
             .codex/artifacts/gate-11/ci-gate-10.2x-smoke.txt
+            .codex/artifacts/gate-11/ci-gate-12-proof.txt
 
       - name: Write job summary
         if: always()
@@ -108,6 +130,8 @@ jobs:
             echo "- BASE_URL: ${BASE_URL}"
             echo "- gate-11-proof exit code: ${{ steps.gate11.outputs.exit_code }}"
             echo "- gate-10.2x-smoke exit code: ${{ steps.gate102x.outputs.exit_code }}"
+            echo "- gate-12-proof ran: ${{ steps.gate12.outputs.ran || 'false' }}"
+            echo "- gate-12-proof exit code: ${{ steps.gate12.outputs.exit_code }}"
             echo
             echo "### gate-11-proof.mjs"
             grep -E "^TOTAL:" .codex/artifacts/gate-11/ci-gate-11-proof.txt || tail -n 20 .codex/artifacts/gate-11/ci-gate-11-proof.txt
@@ -115,6 +139,13 @@ jobs:
             grep -E "^(ROOT_CAUSE|FAIL|ERROR|HTTP|Missing)" .codex/artifacts/gate-11/ci-gate-11-proof.txt | head -n 50 || true
             echo "#### Tail (last 40 lines):"
             tail -n 40 .codex/artifacts/gate-11/ci-gate-11-proof.txt || true
+            echo
+            echo "### gate-12-proof.mjs"
+            grep -E "^TOTAL:" .codex/artifacts/gate-11/ci-gate-12-proof.txt || tail -n 20 .codex/artifacts/gate-11/ci-gate-12-proof.txt
+            echo "#### gate-12-proof root cause (if any)"
+            grep -E "^(ROOT_CAUSE|FAIL|ERROR|HTTP|Missing|INFO:)" .codex/artifacts/gate-11/ci-gate-12-proof.txt | head -n 50 || true
+            echo "#### Tail (last 40 lines):"
+            tail -n 40 .codex/artifacts/gate-11/ci-gate-12-proof.txt || true
             echo
             echo "### gate-10.2x-smoke.mjs"
             grep -E "^TOTAL:" .codex/artifacts/gate-11/ci-gate-10.2x-smoke.txt || tail -n 20 .codex/artifacts/gate-11/ci-gate-10.2x-smoke.txt
@@ -141,8 +172,10 @@ jobs:
 
             const gate11Path = '.codex/artifacts/gate-11/ci-gate-11-proof.txt';
             const smokePath = '.codex/artifacts/gate-11/ci-gate-10.2x-smoke.txt';
+            const gate12Path = '.codex/artifacts/gate-11/ci-gate-12-proof.txt';
             const gate11 = fs.existsSync(gate11Path) ? fs.readFileSync(gate11Path, 'utf8') : '';
             const smoke = fs.existsSync(smokePath) ? fs.readFileSync(smokePath, 'utf8') : '';
+            const gate12 = fs.existsSync(gate12Path) ? fs.readFileSync(gate12Path, 'utf8') : '';
 
             const findTotal = (text) => {
               const m = text.match(/^TOTAL:\s.*$/m);
@@ -150,7 +183,7 @@ jobs:
             };
 
             const marker = '<!-- gate-11-proof-bot -->';
-            const body = `${marker}\n## Gate 11 CI Proof Result\n\n- BASE_URL: ${{ inputs.base_url }}\n- gate-11-proof: ${'${{ steps.gate11.outputs.exit_code }}' === '0' ? 'PASS' : 'FAIL'} (exit ${'${{ steps.gate11.outputs.exit_code }}'})\n- gate-10.2x-smoke: ${'${{ steps.gate102x.outputs.exit_code }}' === '0' ? 'PASS' : 'FAIL'} (exit ${'${{ steps.gate102x.outputs.exit_code }}'})\n\n### Totals\n- gate-11-proof: ${findTotal(gate11)}\n- gate-10.2x-smoke: ${findTotal(smoke)}\n\nArtifacts: download \`gate-11-proof-artifacts\` from this workflow run.\n\nReminder: validate Vercel runtime log signatures for /api/ai/wardrobe/tag, /api/ai/wardrobe/tag-batch, /api/ai/outfit, and upload pipeline endpoints.`;
+            const body = `${marker}\n## Gate 11 CI Proof Result\n\n- BASE_URL: ${{ inputs.base_url }}\n- gate-11-proof: ${'${{ steps.gate11.outputs.exit_code }}' === '0' ? 'PASS' : 'FAIL'} (exit ${'${{ steps.gate11.outputs.exit_code }}'})\n- gate-12-proof: ${'${{ steps.gate12.outputs.exit_code }}' === '0' ? 'PASS' : 'FAIL'} (exit ${'${{ steps.gate12.outputs.exit_code }}'})\n- gate-10.2x-smoke: ${'${{ steps.gate102x.outputs.exit_code }}' === '0' ? 'PASS' : 'FAIL'} (exit ${'${{ steps.gate102x.outputs.exit_code }}'})\n\n### Totals\n- gate-11-proof: ${findTotal(gate11)}\n- gate-12-proof: ${findTotal(gate12)}\n- gate-10.2x-smoke: ${findTotal(smoke)}\n\nArtifacts: download \`gate-11-proof-artifacts\` from this workflow run.\n\nReminder: validate Vercel runtime log signatures for /api/ai/wardrobe/tag, /api/ai/wardrobe/tag-batch, /api/ai/outfit, and upload pipeline endpoints.`;
 
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
@@ -176,8 +209,8 @@ jobs:
               });
             }
 
-      - name: Fail workflow if either proof script failed
-        if: steps.gate11.outputs.exit_code != '0' || steps.gate102x.outputs.exit_code != '0'
+      - name: Fail workflow if any proof script failed
+        if: steps.gate11.outputs.exit_code != '0' || steps.gate12.outputs.exit_code != '0' || steps.gate102x.outputs.exit_code != '0'
         run: |
           echo "One or more proof scripts failed. See uploaded artifacts and job summary."
           exit 1

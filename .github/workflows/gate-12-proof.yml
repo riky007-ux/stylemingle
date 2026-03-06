@@ -1,0 +1,128 @@
+name: Gate 12 Proof
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: "Preview BASE_URL to validate (e.g. https://...vercel.app)"
+        required: true
+        type: string
+      vercel_protection_bypass:
+        description: "Optional x-vercel-protection-bypass override"
+        required: false
+        type: string
+      pr_number:
+        description: "Optional PR number to post/update proof summary comment"
+        required: false
+        type: string
+
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      BASE_URL: ${{ inputs.base_url }}
+      SMOKE_EMAIL: ${{ secrets.SMOKE_EMAIL }}
+      SMOKE_PASSWORD: ${{ secrets.SMOKE_PASSWORD }}
+      VERCEL_PROTECTION_BYPASS: ${{ inputs.vercel_protection_bypass != '' && inputs.vercel_protection_bypass || secrets.VERCEL_PROTECTION_BYPASS }}
+      VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+      PERSONALIZATION_PROOF_TOKEN: ${{ secrets.PERSONALIZATION_PROOF_TOKEN }}
+      PREMIUM_ADMIN_TOKEN: ${{ secrets.PREMIUM_ADMIN_TOKEN }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.pr_number != '' && format('refs/pull/{0}/head', inputs.pr_number) || github.ref }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Validate required inputs/secrets
+        run: |
+          set -euo pipefail
+          if [ -z "${BASE_URL:-}" ]; then
+            echo "Missing required workflow input: base_url"
+            exit 2
+          fi
+          if [ -z "${SMOKE_EMAIL:-}" ] || [ -z "${SMOKE_PASSWORD:-}" ]; then
+            echo "Missing SMOKE_EMAIL/SMOKE_PASSWORD secrets"
+            exit 2
+          fi
+          if [ -z "${PERSONALIZATION_PROOF_TOKEN:-}" ]; then
+            echo "Missing PERSONALIZATION_PROOF_TOKEN secret"
+            exit 2
+          fi
+
+      - name: Prepare artifact directory
+        run: mkdir -p .codex/artifacts/gate-12
+
+      - name: Run Gate 11 proof
+        id: gate11
+        run: |
+          set +e
+          node .codex/gate-11-proof.mjs 2>&1 | tee .codex/artifacts/gate-12/ci-gate-11-proof.txt
+          code=${PIPESTATUS[0]}
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          echo "EXIT_CODE=$code" >> .codex/artifacts/gate-12/ci-gate-11-proof.txt
+          exit 0
+
+      - name: Run Gate 12 proof
+        id: gate12
+        run: |
+          set +e
+          node .codex/gate-12-proof.mjs 2>&1 | tee .codex/artifacts/gate-12/ci-gate-12-proof.txt
+          code=${PIPESTATUS[0]}
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          echo "EXIT_CODE=$code" >> .codex/artifacts/gate-12/ci-gate-12-proof.txt
+          exit 0
+
+      - name: Upload proof artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate-12-proof-artifacts
+          path: .codex/artifacts/gate-12/*.txt
+
+      - name: Write summary
+        if: always()
+        run: |
+          {
+            echo "## Gate 12 Proof Summary"
+            echo "- gate-11 exit: ${{ steps.gate11.outputs.exit_code }}"
+            echo "- gate-12 exit: ${{ steps.gate12.outputs.exit_code }}"
+            echo
+            echo "### Totals"
+            grep -E "^TOTAL:" .codex/artifacts/gate-12/ci-gate-11-proof.txt || true
+            grep -E "^TOTAL:" .codex/artifacts/gate-12/ci-gate-12-proof.txt || true
+            echo
+            echo "### Root cause lines"
+            grep -E "^(ROOT_CAUSE|FAIL|ERROR|Missing|HTTP)" .codex/artifacts/gate-12/ci-gate-12-proof.txt | head -n 50 || true
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Post/update PR comment summary
+        if: always() && inputs.pr_number != ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const marker = '<!-- gate-12-proof-bot -->';
+            const p11 = fs.existsSync('.codex/artifacts/gate-12/ci-gate-11-proof.txt') ? fs.readFileSync('.codex/artifacts/gate-12/ci-gate-11-proof.txt', 'utf8') : '';
+            const p12 = fs.existsSync('.codex/artifacts/gate-12/ci-gate-12-proof.txt') ? fs.readFileSync('.codex/artifacts/gate-12/ci-gate-12-proof.txt', 'utf8') : '';
+            const total = (t) => (t.match(/^TOTAL:\s.*$/m) || ['TOTAL: unavailable'])[0];
+            const body = `${marker}\n## Gate 12 CI Proof Result\n\n- BASE_URL: ${{ inputs.base_url }}\n- gate-11: ${'${{ steps.gate11.outputs.exit_code }}' === '0' ? 'PASS' : 'FAIL'}\n- gate-12: ${'${{ steps.gate12.outputs.exit_code }}' === '0' ? 'PASS' : 'FAIL'}\n\n- gate-11 total: ${total(p11)}\n- gate-12 total: ${total(p12)}\n\nArtifacts: download \`gate-12-proof-artifacts\`.`;
+            const prNumber = Number('${{ inputs.pr_number }}');
+            const { data: comments } = await github.rest.issues.listComments({ owner: context.repo.owner, repo: context.repo.repo, issue_number: prNumber, per_page: 100 });
+            const existing = comments.find((c) => c.body && c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner: context.repo.owner, repo: context.repo.repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: prNumber, body });
+            }
+
+      - name: Fail workflow if proofs failed
+        if: steps.gate11.outputs.exit_code != '0' || steps.gate12.outputs.exit_code != '0'
+        run: exit 1
