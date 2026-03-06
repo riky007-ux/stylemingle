@@ -16,8 +16,29 @@ type JournalSummary = {
   lastTag: string | null;
 };
 
-function jsonError(status: number, code: string, message: string, extras: Record<string, unknown> = {}) {
-  return NextResponse.json({ ok: false, code, message, ...extras }, { status });
+type Gate12State = {
+  hasIsPremium: boolean;
+  detectedPremiumColumnName: PremiumColumnName;
+  hasStyleProfileTable: boolean;
+  hasFeedbackTable: boolean;
+  hasFeedbackColumns: boolean;
+  tables: string[];
+};
+
+function gateReady(state: Gate12State) {
+  return state.hasIsPremium && state.hasStyleProfileTable && state.hasFeedbackColumns;
+}
+
+function blockingReasons(state: Gate12State) {
+  const reasons: string[] = [];
+  if (!state.hasIsPremium) reasons.push("MISSING_PREMIUM_COLUMN");
+  if (!state.hasStyleProfileTable) reasons.push("MISSING_STYLE_PROFILE_SCHEMA");
+  if (!state.hasFeedbackColumns) reasons.push("MISSING_FEEDBACK_COLUMNS");
+  return reasons;
+}
+
+function jsonWithStatus(status: number, body: Record<string, unknown>) {
+  return NextResponse.json({ httpStatus: status, ...body }, { status });
 }
 
 function endpointEnabled() {
@@ -56,21 +77,27 @@ function makeDbFingerprint() {
   };
 }
 
-function isAuthOrTokenInvalid(req: Request) {
+function buildInfo() {
+  return {
+    commitSha: process.env.VERCEL_GIT_COMMIT_SHA || process.env.GIT_COMMIT_SHA || null,
+    vercelEnv: process.env.VERCEL_ENV || null,
+  };
+}
+
+function authCheck(req: Request) {
+  if (!endpointEnabled()) return { error: jsonWithStatus(404, { ok: false, code: "NOT_FOUND", message: "Endpoint disabled in production" }) };
+
+  const userId = getUserIdFromRequest(req);
+  if (!userId) return { error: jsonWithStatus(401, { ok: false, code: "NOT_AUTHENTICATED", message: "You must be logged in" }) };
+
   const expectedToken = process.env.PREMIUM_ADMIN_TOKEN;
-  if (!expectedToken) {
-    return { error: jsonError(503, "ADMIN_TOKEN_NOT_CONFIGURED", "Admin token not configured") };
-  }
+  if (!expectedToken) return { error: jsonWithStatus(503, { ok: false, code: "ADMIN_TOKEN_NOT_CONFIGURED", message: "Admin token not configured" }) };
 
-  const providedToken = req.headers.get("x-stylemingle-admin-token");
-  if (!providedToken) {
-    return { error: jsonError(403, "ADMIN_TOKEN_MISSING", "Admin token header is required") };
-  }
-  if (providedToken !== expectedToken) {
-    return { error: jsonError(403, "INVALID_ADMIN_TOKEN", "Admin token is invalid") };
-  }
+  const providedToken = req.headers.get("x-stylemingle-admin-token") || "";
+  if (!providedToken) return { error: jsonWithStatus(403, { ok: false, code: "ADMIN_TOKEN_MISSING", message: "Admin token header is required" }) };
+  if (providedToken !== expectedToken) return { error: jsonWithStatus(403, { ok: false, code: "INVALID_ADMIN_TOKEN", message: "Admin token is invalid" }) };
 
-  return { ok: true };
+  return { userId };
 }
 
 function listMigrationFiles(migrationsFolder: string) {
@@ -107,49 +134,46 @@ async function getTableColumns(client: ReturnType<typeof createClient>, table: s
   return (result.rows || []).map((row: any) => String(row?.name || "")).filter(Boolean);
 }
 
-async function detectUsersPremiumSchema(client: ReturnType<typeof createClient>) {
-  const columns = await getTableColumns(client, "users");
+async function inspectGate12State(client: ReturnType<typeof createClient>): Promise<Gate12State> {
+  const { tables } = await readTables(client);
+  const usersColumns = tables.includes("users") ? await getTableColumns(client, "users").catch(() => [] as string[]) : [];
+  const styleColumns = tables.includes("user_style_profile") ? await getTableColumns(client, "user_style_profile").catch(() => [] as string[]) : [];
+  const ratingColumns = tables.includes("ratings") ? await getTableColumns(client, "ratings").catch(() => [] as string[]) : [];
+
   let detectedPremiumColumnName: PremiumColumnName = null;
-  if (columns.includes("isPremium")) detectedPremiumColumnName = "isPremium";
-  if (!detectedPremiumColumnName && columns.includes("is_premium")) detectedPremiumColumnName = "is_premium";
+  if (usersColumns.includes("isPremium")) detectedPremiumColumnName = "isPremium";
+  if (!detectedPremiumColumnName && usersColumns.includes("is_premium")) detectedPremiumColumnName = "is_premium";
+
+  const requiredStyle = ["userId", "styleVibes", "fitPreference", "comfortFashion", "colorsLove", "colorsAvoid", "climate", "budgetSensitivity", "updatedAt"];
+
   return {
     hasIsPremium: Boolean(detectedPremiumColumnName),
     detectedPremiumColumnName,
-    columns,
+    hasStyleProfileTable: requiredStyle.every((c) => styleColumns.includes(c)),
+    hasFeedbackTable: tables.includes("ratings"),
+    hasFeedbackColumns: ratingColumns.includes("reasons") && ratingColumns.includes("note"),
+    tables,
   };
 }
 
 async function ensurePremiumColumnsExist(client: ReturnType<typeof createClient>) {
-  const before = await detectUsersPremiumSchema(client);
   let forcedPremiumSchemaPatchApplied = false;
+  const usersColumns = await getTableColumns(client, "users").catch(() => [] as string[]);
 
-  if (!before.columns.includes("isPremium")) {
-    await client.execute('ALTER TABLE users ADD COLUMN "isPremium" INTEGER NOT NULL DEFAULT 0;').catch(() => null);
-    forcedPremiumSchemaPatchApplied = true;
+  if (!usersColumns.includes("isPremium")) {
+    const changed = await client.execute('ALTER TABLE users ADD COLUMN "isPremium" INTEGER NOT NULL DEFAULT 0;').catch(() => null);
+    if (changed) forcedPremiumSchemaPatchApplied = true;
   }
 
-  if (!before.columns.includes("is_premium")) {
-    await client.execute("ALTER TABLE users ADD COLUMN is_premium INTEGER NOT NULL DEFAULT 0;").catch(() => null);
-    forcedPremiumSchemaPatchApplied = true;
+  if (!usersColumns.includes("is_premium")) {
+    const changed = await client.execute("ALTER TABLE users ADD COLUMN is_premium INTEGER NOT NULL DEFAULT 0;").catch(() => null);
+    if (changed) forcedPremiumSchemaPatchApplied = true;
   }
 
-  await client.execute(`
-    UPDATE users
-    SET is_premium = CASE
-      WHEN "isPremium" IS NOT NULL AND "isPremium" != 0 THEN 1
-      ELSE 0
-    END;
-  `).catch(() => null);
+  await client.execute('UPDATE users SET is_premium = CASE WHEN "isPremium" IS NOT NULL AND "isPremium" != 0 THEN 1 ELSE 0 END;').catch(() => null);
+  await client.execute('UPDATE users SET "isPremium" = CASE WHEN is_premium IS NOT NULL AND is_premium != 0 THEN 1 ELSE 0 END;').catch(() => null);
 
-  await client.execute(`
-    UPDATE users
-    SET "isPremium" = CASE
-      WHEN is_premium IS NOT NULL AND is_premium != 0 THEN 1
-      ELSE 0
-    END;
-  `).catch(() => null);
-
-  return { forcedPremiumSchemaPatchApplied, after: await detectUsersPremiumSchema(client) };
+  return forcedPremiumSchemaPatchApplied;
 }
 
 async function ensureStyleProfileSchema(client: ReturnType<typeof createClient>) {
@@ -171,11 +195,11 @@ async function ensureStyleProfileSchema(client: ReturnType<typeof createClient>)
   `).catch(() => null);
 
   const addColumn = async (sql: string) => {
-    const result = await client.execute(sql).catch(() => null);
-    if (result !== null) forcedStyleProfileSchemaPatchApplied = true;
+    const changed = await client.execute(sql).catch(() => null);
+    if (changed) forcedStyleProfileSchemaPatchApplied = true;
   };
 
-  let columns = await getTableColumns(client, "user_style_profile").catch(() => [] as string[]);
+  const columns = await getTableColumns(client, "user_style_profile").catch(() => [] as string[]);
   if (!columns.includes("styleVibes")) await addColumn("ALTER TABLE user_style_profile ADD COLUMN styleVibes TEXT NOT NULL DEFAULT '[]';");
   if (!columns.includes("fitPreference")) await addColumn("ALTER TABLE user_style_profile ADD COLUMN fitPreference TEXT;");
   if (!columns.includes("comfortFashion")) await addColumn("ALTER TABLE user_style_profile ADD COLUMN comfortFashion INTEGER NOT NULL DEFAULT 50;");
@@ -185,11 +209,7 @@ async function ensureStyleProfileSchema(client: ReturnType<typeof createClient>)
   if (!columns.includes("budgetSensitivity")) await addColumn("ALTER TABLE user_style_profile ADD COLUMN budgetSensitivity TEXT;");
   if (!columns.includes("updatedAt")) await addColumn("ALTER TABLE user_style_profile ADD COLUMN updatedAt INTEGER NOT NULL DEFAULT 0;");
 
-  columns = await getTableColumns(client, "user_style_profile").catch(() => [] as string[]);
-  const required = ["userId", "styleVibes", "fitPreference", "comfortFashion", "colorsLove", "colorsAvoid", "climate", "budgetSensitivity", "updatedAt"];
-  const hasStyleProfileTable = required.every((c) => columns.includes(c));
-
-  return { forcedStyleProfileSchemaPatchApplied, hasStyleProfileTable };
+  return forcedStyleProfileSchemaPatchApplied;
 }
 
 async function ensureFeedbackSchema(client: ReturnType<typeof createClient>) {
@@ -211,87 +231,112 @@ async function ensureFeedbackSchema(client: ReturnType<typeof createClient>) {
 
   const columns = await getTableColumns(client, "ratings").catch(() => [] as string[]);
   if (!columns.includes("reasons")) {
-    const result = await client.execute("ALTER TABLE ratings ADD COLUMN reasons TEXT;").catch(() => null);
-    if (result !== null) forcedFeedbackSchemaPatchApplied = true;
+    const changed = await client.execute("ALTER TABLE ratings ADD COLUMN reasons TEXT;").catch(() => null);
+    if (changed) forcedFeedbackSchemaPatchApplied = true;
   }
   if (!columns.includes("note")) {
-    const result = await client.execute("ALTER TABLE ratings ADD COLUMN note TEXT;").catch(() => null);
-    if (result !== null) forcedFeedbackSchemaPatchApplied = true;
+    const changed = await client.execute("ALTER TABLE ratings ADD COLUMN note TEXT;").catch(() => null);
+    if (changed) forcedFeedbackSchemaPatchApplied = true;
   }
 
-  const afterColumns = await getTableColumns(client, "ratings").catch(() => [] as string[]);
-  return {
-    forcedFeedbackSchemaPatchApplied,
-    hasFeedbackColumns: afterColumns.includes("reasons") && afterColumns.includes("note"),
-  };
+  return forcedFeedbackSchemaPatchApplied;
 }
 
 async function readDrizzleMigrations(client: ReturnType<typeof createClient>) {
   const { tables } = await readTables(client);
   const tableName = tables.find((n) => n === "__drizzle_migrations") || tables.find((n) => n.includes("drizzle") && n.includes("migration"));
-  if (!tableName) return [];
+  if (!tableName) return [] as string[];
 
   const rows = await client.execute(`SELECT * FROM ${tableName} ORDER BY rowid DESC LIMIT 20`);
-  return (rows.rows || []).map((row: any) => ({
-    id: row.id ?? row.rowid ?? null,
-    hash: row.hash ?? row.checksum ?? row.name ?? null,
-    createdAt: row.created_at ?? row.createdAt ?? row.created ?? null,
-  }));
+  return (rows.rows || []).map((row: any) => String(row.hash ?? row.checksum ?? row.name ?? row.id ?? row.rowid ?? "unknown")).filter(Boolean);
 }
 
 export async function POST(req: Request) {
-  if (!endpointEnabled()) return jsonError(404, "NOT_FOUND", "Endpoint disabled in production");
-
-  const userId = getUserIdFromRequest(req);
-  if (!userId) return jsonError(401, "NOT_AUTHENTICATED", "You must be logged in");
-
-  const auth = isAuthOrTokenInvalid(req);
+  const auth = authCheck(req);
   if ("error" in auth) return auth.error;
+
+  const dbFingerprint = makeDbFingerprint();
+  const build = buildInfo();
 
   const url = process.env.TURSO_DATABASE_URL;
   const authToken = process.env.TURSO_AUTH_TOKEN;
-  const dbFingerprint = makeDbFingerprint();
   if (!url || !authToken) {
-    return jsonError(503, "DB_NOT_CONFIGURED", "Database environment variables are not configured", { dbFingerprint });
+    return jsonWithStatus(503, {
+      ok: false,
+      gate12Ready: false,
+      blockingReasons: ["DB_NOT_CONFIGURED"],
+      warnings: [],
+      migrationErrorSummary: null,
+      forcedPremiumSchemaPatchApplied: false,
+      forcedStyleProfileSchemaPatchApplied: false,
+      forcedFeedbackSchemaPatchApplied: false,
+      before: null,
+      after: null,
+      dbMigrations: [],
+      dbFingerprint,
+      buildInfo: build,
+    });
   }
 
   const migrationsFolder = path.join(process.cwd(), "drizzle");
   const journalPath = path.join(migrationsFolder, "meta", "_journal.json");
+  const { allFiles, sqlFiles } = listMigrationFiles(migrationsFolder);
+  const journal = fs.existsSync(journalPath) ? readJournalSummary(journalPath) : { entryCount: 0, lastTag: null };
+
   if (!fs.existsSync(journalPath)) {
     const message = `Missing migrations journal at ${journalPath}. Add drizzle/** to Next output tracing.`;
     console.error(`ROOT_CAUSE: dev-migrate MIGRATIONS_ASSET_MISSING ${safeTrim(message)}`);
-    return jsonError(500, "MIGRATIONS_ASSET_MISSING", message, { dbFingerprint });
-  }
-
-  const { allFiles, sqlFiles } = listMigrationFiles(migrationsFolder);
-  if (sqlFiles.length === 0) {
-    return jsonError(500, "MIGRATIONS_NOT_FOUND", `No migration SQL files found under ${migrationsFolder}`, {
-      migrationsFolder,
+    return jsonWithStatus(500, {
+      ok: false,
+      gate12Ready: false,
+      blockingReasons: ["MIGRATIONS_ASSET_MISSING"],
+      warnings: [],
+      migrationErrorSummary: message,
+      forcedPremiumSchemaPatchApplied: false,
+      forcedStyleProfileSchemaPatchApplied: false,
+      forcedFeedbackSchemaPatchApplied: false,
+      before: null,
+      after: null,
+      dbMigrations: [],
       filesSeen: allFiles,
       dbFingerprint,
+      buildInfo: build,
     });
   }
 
-  const journal = readJournalSummary(journalPath);
-  if (journal.entryCount === 0 && sqlFiles.length > 0) {
-    const message = "Migration journal has zero entries while SQL files exist. Check drizzle/meta/_journal.json consistency.";
-    console.error(`ROOT_CAUSE: dev-migrate JOURNAL_MISMATCH ${safeTrim(message)}`);
-    return jsonError(500, "JOURNAL_MISMATCH", message, {
-      migrationFilesFound: sqlFiles.length,
-      latestMigrationName: sqlFiles[sqlFiles.length - 1] || null,
-      journal,
+  if (sqlFiles.length === 0 || journal.entryCount === 0) {
+    const reason = sqlFiles.length === 0 ? "MIGRATIONS_NOT_FOUND" : "JOURNAL_MISMATCH";
+    console.error(`ROOT_CAUSE: dev-migrate ${reason} sql=${sqlFiles.length} journal=${journal.entryCount}`);
+    return jsonWithStatus(500, {
+      ok: false,
+      gate12Ready: false,
+      blockingReasons: [reason],
+      warnings: [],
+      migrationErrorSummary: `sqlFiles=${sqlFiles.length}; journalEntries=${journal.entryCount}`,
+      forcedPremiumSchemaPatchApplied: false,
+      forcedStyleProfileSchemaPatchApplied: false,
+      forcedFeedbackSchemaPatchApplied: false,
+      before: null,
+      after: null,
+      dbMigrations: [],
       dbFingerprint,
+      buildInfo: build,
     });
   }
 
   const client = createClient({ url, authToken });
   const drizzleDb = drizzle(client);
-
-  const beforeTablesResult = await client.execute("SELECT name FROM sqlite_master WHERE type='table'");
-  const beforeTables = new Set((beforeTablesResult.rows || []).map((r: any) => String(r?.name || "")));
-
   const warnings: string[] = [];
   let migrationErrorSummary: string | null = null;
+
+  const before = await inspectGate12State(client).catch(() => ({
+    hasIsPremium: false,
+    detectedPremiumColumnName: null,
+    hasStyleProfileTable: false,
+    hasFeedbackTable: false,
+    hasFeedbackColumns: false,
+    tables: [],
+  } as Gate12State));
 
   try {
     await migrate(drizzleDb, { migrationsFolder });
@@ -300,80 +345,50 @@ export async function POST(req: Request) {
     migrationErrorSummary = safeMessage;
     if (safeMessage.toLowerCase().includes("already exists")) {
       warnings.push("BASELINE_SCHEMA_DETECTED");
-      console.warn(`ROOT_CAUSE: dev-migrate BASELINE_SCHEMA_DETECTED ${safeMessage}`);
+      console.warn(`WARN: dev-migrate BASELINE_SCHEMA_DETECTED ${safeMessage}`);
     } else {
       warnings.push("MIGRATOR_WARNING");
-      console.warn(`ROOT_CAUSE: dev-migrate MIGRATOR_WARNING ${safeMessage}`);
+      console.warn(`WARN: dev-migrate MIGRATOR_WARNING ${safeMessage}`);
     }
   }
 
-  try {
-    const afterTablesResult = await client.execute("SELECT name FROM sqlite_master WHERE type='table'");
-    const afterTables = new Set((afterTablesResult.rows || []).map((r: any) => String(r?.name || "")));
-    const applied = [...afterTables].filter((name) => name && !beforeTables.has(name));
-    const alreadyUpToDate = applied.length === 0;
+  const forcedPremiumSchemaPatchApplied = await ensurePremiumColumnsExist(client);
+  const forcedStyleProfileSchemaPatchApplied = await ensureStyleProfileSchema(client);
+  const forcedFeedbackSchemaPatchApplied = await ensureFeedbackSchema(client);
 
-    const premiumEnsure = await ensurePremiumColumnsExist(client);
-    const styleEnsure = await ensureStyleProfileSchema(client);
-    const feedbackEnsure = await ensureFeedbackSchema(client);
-    const tablesInfo = await readTables(client);
-    const dbMigrations = await readDrizzleMigrations(client);
+  const after = await inspectGate12State(client).catch(() => ({
+    hasIsPremium: false,
+    detectedPremiumColumnName: null,
+    hasStyleProfileTable: false,
+    hasFeedbackTable: false,
+    hasFeedbackColumns: false,
+    tables: [],
+  } as Gate12State));
 
-    const after = {
-      hasIsPremium: premiumEnsure.after.hasIsPremium,
-      detectedPremiumColumnName: premiumEnsure.after.detectedPremiumColumnName,
-      hasStyleProfileTable: styleEnsure.hasStyleProfileTable,
-      hasFeedbackColumns: feedbackEnsure.hasFeedbackColumns,
-    };
+  const isReady = gateReady(after);
+  const reasons = blockingReasons(after);
+  const dbMigrations = await readDrizzleMigrations(client).catch(() => [] as string[]);
 
-    const gate12Ready = after.hasIsPremium && after.hasStyleProfileTable && after.hasFeedbackColumns;
-    if (!gate12Ready) {
-      const message = "Migrations did not produce complete Gate 12 schema. Check DB target, permissions, and migration execution path.";
-      console.error(`ROOT_CAUSE: dev-migrate MIGRATIONS_DID_NOT_PRODUCE_GATE12_SCHEMA ${safeTrim(message)}`);
-      return jsonError(500, "MIGRATIONS_DID_NOT_PRODUCE_GATE12_SCHEMA", message, {
-        migrationFilesFound: sqlFiles.length,
-        latestMigrationName: sqlFiles[sqlFiles.length - 1] || null,
-        journalEntriesCount: journal.entryCount,
-        journal,
-        tablesFound: tablesInfo.tables,
-        hasDrizzleMigrationsTable: tablesInfo.hasDrizzleMigrationsTable,
-        alreadyUpToDate,
-        dbFingerprint,
-        warnings,
-        migrationErrorSummary,
-        forcedPremiumSchemaPatchApplied: premiumEnsure.forcedPremiumSchemaPatchApplied,
-        forcedStyleProfileSchemaPatchApplied: styleEnsure.forcedStyleProfileSchemaPatchApplied,
-        forcedFeedbackSchemaPatchApplied: feedbackEnsure.forcedFeedbackSchemaPatchApplied,
-        after,
-        dbMigrations,
-      });
-    }
+  const payload = {
+    ok: isReady,
+    gate12Ready: isReady,
+    blockingReasons: reasons,
+    warnings,
+    migrationErrorSummary,
+    forcedPremiumSchemaPatchApplied,
+    forcedStyleProfileSchemaPatchApplied,
+    forcedFeedbackSchemaPatchApplied,
+    before,
+    after,
+    dbMigrations,
+    dbFingerprint,
+    buildInfo: build,
+  };
 
-    return NextResponse.json({
-      ok: true,
-      applied,
-      alreadyUpToDate,
-      migrationFilesFound: sqlFiles.length,
-      latestMigrationName: sqlFiles[sqlFiles.length - 1] || null,
-      journal,
-      tables: tablesInfo.tables,
-      hasDrizzleMigrationsTable: tablesInfo.hasDrizzleMigrationsTable,
-      warnings,
-      migrationErrorSummary,
-      forcedPremiumSchemaPatchApplied: premiumEnsure.forcedPremiumSchemaPatchApplied,
-      forcedStyleProfileSchemaPatchApplied: styleEnsure.forcedStyleProfileSchemaPatchApplied,
-      forcedFeedbackSchemaPatchApplied: feedbackEnsure.forcedFeedbackSchemaPatchApplied,
-      after,
-      dbMigrations,
-      dbFingerprint,
-    });
-  } catch (error) {
-    const safeMessage = safeTrim((error as any)?.message || error);
-    console.error(`ROOT_CAUSE: dev-migrate DEV_MIGRATE_INTERNAL ${safeMessage}`);
-    return jsonError(500, "DEV_MIGRATE_INTERNAL", "Migration runner failed", {
-      dbFingerprint,
-      warnings,
-      migrationErrorSummary,
-    });
+  if (!isReady) {
+    console.error(`ROOT_CAUSE: dev-migrate MIGRATIONS_DID_NOT_PRODUCE_GATE12_SCHEMA ${safeTrim(reasons.join(","))}`);
+    return jsonWithStatus(500, payload);
   }
+
+  return jsonWithStatus(200, payload);
 }
