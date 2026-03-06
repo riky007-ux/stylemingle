@@ -154,6 +154,7 @@ async function ensurePremiumColumnsExist(client: ReturnType<typeof createClient>
 
 async function ensureStyleProfileSchema(client: ReturnType<typeof createClient>) {
   let forcedStyleProfileSchemaPatchApplied = false;
+
   await client.execute(`
     CREATE TABLE IF NOT EXISTS user_style_profile (
       userId TEXT PRIMARY KEY NOT NULL,
@@ -169,36 +170,55 @@ async function ensureStyleProfileSchema(client: ReturnType<typeof createClient>)
     );
   `).catch(() => null);
 
-  const columns = await getTableColumns(client, "user_style_profile").catch(() => [] as string[]);
+  const addColumn = async (sql: string) => {
+    const result = await client.execute(sql).catch(() => null);
+    if (result !== null) forcedStyleProfileSchemaPatchApplied = true;
+  };
+
+  let columns = await getTableColumns(client, "user_style_profile").catch(() => [] as string[]);
+  if (!columns.includes("styleVibes")) await addColumn("ALTER TABLE user_style_profile ADD COLUMN styleVibes TEXT NOT NULL DEFAULT '[]';");
+  if (!columns.includes("fitPreference")) await addColumn("ALTER TABLE user_style_profile ADD COLUMN fitPreference TEXT;");
+  if (!columns.includes("comfortFashion")) await addColumn("ALTER TABLE user_style_profile ADD COLUMN comfortFashion INTEGER NOT NULL DEFAULT 50;");
+  if (!columns.includes("colorsLove")) await addColumn("ALTER TABLE user_style_profile ADD COLUMN colorsLove TEXT NOT NULL DEFAULT '[]';");
+  if (!columns.includes("colorsAvoid")) await addColumn("ALTER TABLE user_style_profile ADD COLUMN colorsAvoid TEXT NOT NULL DEFAULT '[]';");
+  if (!columns.includes("climate")) await addColumn("ALTER TABLE user_style_profile ADD COLUMN climate TEXT;");
+  if (!columns.includes("budgetSensitivity")) await addColumn("ALTER TABLE user_style_profile ADD COLUMN budgetSensitivity TEXT;");
+  if (!columns.includes("updatedAt")) await addColumn("ALTER TABLE user_style_profile ADD COLUMN updatedAt INTEGER NOT NULL DEFAULT 0;");
+
+  columns = await getTableColumns(client, "user_style_profile").catch(() => [] as string[]);
   const required = ["userId", "styleVibes", "fitPreference", "comfortFashion", "colorsLove", "colorsAvoid", "climate", "budgetSensitivity", "updatedAt"];
+  const hasStyleProfileTable = required.every((c) => columns.includes(c));
 
-  if (columns.length > 0) {
-    if (!columns.includes("climate")) {
-      await client.execute("ALTER TABLE user_style_profile ADD COLUMN climate TEXT;").catch(() => null);
-      forcedStyleProfileSchemaPatchApplied = true;
-    }
-    if (!columns.includes("budgetSensitivity")) {
-      await client.execute("ALTER TABLE user_style_profile ADD COLUMN budgetSensitivity TEXT;").catch(() => null);
-      forcedStyleProfileSchemaPatchApplied = true;
-    }
-  }
-
-  const afterColumns = await getTableColumns(client, "user_style_profile").catch(() => [] as string[]);
-  const hasStyleProfileTable = required.every((c) => afterColumns.includes(c));
   return { forcedStyleProfileSchemaPatchApplied, hasStyleProfileTable };
 }
 
 async function ensureFeedbackSchema(client: ReturnType<typeof createClient>) {
   let forcedFeedbackSchemaPatchApplied = false;
+
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS ratings (
+      id TEXT PRIMARY KEY NOT NULL,
+      outfitId TEXT NOT NULL,
+      rating INTEGER NOT NULL,
+      userId TEXT NOT NULL,
+      createdAt INTEGER NOT NULL,
+      reasons TEXT,
+      note TEXT,
+      FOREIGN KEY (outfitId) REFERENCES outfits(id),
+      FOREIGN KEY (userId) REFERENCES users(id)
+    );
+  `).catch(() => null);
+
   const columns = await getTableColumns(client, "ratings").catch(() => [] as string[]);
   if (!columns.includes("reasons")) {
-    await client.execute("ALTER TABLE ratings ADD COLUMN reasons TEXT;").catch(() => null);
-    forcedFeedbackSchemaPatchApplied = true;
+    const result = await client.execute("ALTER TABLE ratings ADD COLUMN reasons TEXT;").catch(() => null);
+    if (result !== null) forcedFeedbackSchemaPatchApplied = true;
   }
   if (!columns.includes("note")) {
-    await client.execute("ALTER TABLE ratings ADD COLUMN note TEXT;").catch(() => null);
-    forcedFeedbackSchemaPatchApplied = true;
+    const result = await client.execute("ALTER TABLE ratings ADD COLUMN note TEXT;").catch(() => null);
+    if (result !== null) forcedFeedbackSchemaPatchApplied = true;
   }
+
   const afterColumns = await getTableColumns(client, "ratings").catch(() => [] as string[]);
   return {
     forcedFeedbackSchemaPatchApplied,
@@ -282,7 +302,8 @@ export async function POST(req: Request) {
       warnings.push("BASELINE_SCHEMA_DETECTED");
       console.warn(`ROOT_CAUSE: dev-migrate BASELINE_SCHEMA_DETECTED ${safeMessage}`);
     } else {
-      console.error(`ROOT_CAUSE: dev-migrate MIGRATOR_FAILURE ${safeMessage}`);
+      warnings.push("MIGRATOR_WARNING");
+      console.warn(`ROOT_CAUSE: dev-migrate MIGRATOR_WARNING ${safeMessage}`);
     }
   }
 
