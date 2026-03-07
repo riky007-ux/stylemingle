@@ -6,7 +6,13 @@ import { cookies } from "next/headers";
 import { db } from "@/lib/db";
 import { AUTH_COOKIE_NAME, verifyToken } from "@/lib/auth";
 import { wardrobe_item_analysis, wardrobe_items } from "@/lib/schema";
-import { isVisualAwarenessEnabled, parseJsonArray, parseJsonMap, VISUAL_REVIEW_FIELDS } from "@/lib/visualAwareness";
+import {
+  isVisualAwarenessEnabled,
+  parseJsonArray,
+  parseJsonMap,
+  VISUAL_REVIEW_FIELDS,
+  type VisualReviewField,
+} from "@/lib/visualAwareness";
 
 function getUserId() {
   const token = cookies().get(AUTH_COOKIE_NAME)?.value;
@@ -28,6 +34,22 @@ function serializeAnalysis(row: any) {
     needsReviewFields: parseJsonArray(row.needsReviewFields),
     fieldConfidence: parseJsonMap(row.fieldConfidence),
   };
+}
+
+function asStringOrNull(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function asStringArray(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value.filter((v) => typeof v === "string" && v.trim()).map((v) => v.trim());
+}
+
+function asReviewFields(value: unknown): VisualReviewField[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((field): field is string => typeof field === "string")
+    .filter((field): field is VisualReviewField => VISUAL_REVIEW_FIELDS.includes(field as VisualReviewField));
 }
 
 export async function GET(_request: Request, { params }: { params: { id: string } }) {
@@ -60,21 +82,21 @@ export async function PATCH(request: Request, { params }: { params: { id: string
     .limit(1);
   if (!item) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  const patch: any = {
-    category: body.category ?? null,
-    subcategory: body.subcategory ?? null,
-    primaryColor: body.primaryColor ?? null,
-    secondaryColors: JSON.stringify(Array.isArray(body.secondaryColors) ? body.secondaryColors : []),
-    pattern: body.pattern ?? null,
-    material: body.material ?? null,
-    seasonality: JSON.stringify(Array.isArray(body.seasonality) ? body.seasonality : []),
-    styleTags: JSON.stringify(Array.isArray(body.styleTags) ? body.styleTags : []),
-    brandCandidate: body.brandCandidate ?? null,
-    sizeEstimateCandidate: body.sizeEstimateCandidate ?? null,
-    needsReviewFields: JSON.stringify(Array.isArray(body.needsReviewFields) ? body.needsReviewFields.filter((f: string) => VISUAL_REVIEW_FIELDS.includes(f as any)) : []),
-    reviewedAt: new Date(),
-    updatedAt: new Date(),
-  };
+  const now = new Date();
+
+  const category = asStringOrNull((body as any).category);
+  const subcategory = asStringOrNull((body as any).subcategory);
+  const primaryColor = asStringOrNull((body as any).primaryColor);
+  const secondaryColors = asStringArray((body as any).secondaryColors);
+  const pattern = asStringOrNull((body as any).pattern);
+  const material = asStringOrNull((body as any).material);
+  const seasonality = asStringArray((body as any).seasonality);
+  const styleTags = asStringArray((body as any).styleTags);
+  const brandCandidate = asStringOrNull((body as any).brandCandidate);
+  const sizeEstimateCandidate = asStringOrNull((body as any).sizeEstimateCandidate);
+  const needsReviewFields = asReviewFields((body as any).needsReviewFields);
+
+  const status = needsReviewFields.length === 0 ? "complete" : "needs_review";
 
   const [existing] = await db
     .select()
@@ -90,11 +112,23 @@ export async function PATCH(request: Request, { params }: { params: { id: string
         id: randomUUID(),
         itemId: params.id,
         userId,
-        status: patch.needsReviewFields === "[]" ? "complete" : "needs_review",
-        ...patch,
+        status,
+        category,
+        subcategory,
+        primaryColor,
+        secondaryColors: JSON.stringify(secondaryColors),
+        pattern,
+        material,
+        seasonality: JSON.stringify(seasonality),
+        styleTags: JSON.stringify(styleTags),
+        brandCandidate,
+        sizeEstimateCandidate,
+        needsReviewFields: JSON.stringify(needsReviewFields),
+        reviewedAt: now,
+        updatedAt: now,
+        createdAt: now,
         fieldConfidence: "{}",
         overallConfidence: 0,
-        createdAt: new Date(),
       })
       .returning();
     updated = created;
@@ -102,8 +136,20 @@ export async function PATCH(request: Request, { params }: { params: { id: string
     const [saved] = await db
       .update(wardrobe_item_analysis)
       .set({
-        ...patch,
-        status: patch.needsReviewFields === "[]" ? "complete" : "needs_review",
+        status,
+        category,
+        subcategory,
+        primaryColor,
+        secondaryColors: JSON.stringify(secondaryColors),
+        pattern,
+        material,
+        seasonality: JSON.stringify(seasonality),
+        styleTags: JSON.stringify(styleTags),
+        brandCandidate,
+        sizeEstimateCandidate,
+        needsReviewFields: JSON.stringify(needsReviewFields),
+        reviewedAt: now,
+        updatedAt: now,
       })
       .where(and(eq(wardrobe_item_analysis.itemId, params.id), eq(wardrobe_item_analysis.userId, userId)))
       .returning();
@@ -113,9 +159,9 @@ export async function PATCH(request: Request, { params }: { params: { id: string
   await db
     .update(wardrobe_items)
     .set({
-      category: patch.category,
-      primaryColor: patch.primaryColor,
-      styleTag: (JSON.parse(patch.styleTags)[0] as string) ?? null,
+      category,
+      primaryColor,
+      styleTag: styleTags[0] ?? null,
     })
     .where(and(eq(wardrobe_items.id, params.id), eq(wardrobe_items.userId, userId)));
 

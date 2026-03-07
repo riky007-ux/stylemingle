@@ -23,7 +23,7 @@ CREATE TABLE `wardrobe_item_analysis` (
   `reviewedAt` integer,
   `createdAt` integer NOT NULL,
   `updatedAt` integer NOT NULL,
-  FOREIGN KEY (`itemId`) REFERENCES `wardrobe_items`(`id`) ON UPDATE no action ON DELETE no action,
+  FOREIGN KEY (`itemId`) REFERENCES `wardrobe_items`(`id`) ON UPDATE no action ON DELETE cascade,
   FOREIGN KEY (`userId`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE no action
 );
 

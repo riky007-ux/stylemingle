@@ -49,7 +49,7 @@ export const wardrobe_item_analysis = sqliteTable("wardrobe_item_analysis", {
   id: text("id").primaryKey(),
   itemId: text("itemId")
     .notNull()
-    .references(() => wardrobe_items.id)
+    .references(() => wardrobe_items.id, { onDelete: "cascade" })
     .unique(),
   userId: text("userId")
     .notNull()

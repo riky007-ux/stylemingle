@@ -38,6 +38,13 @@ type VisualAnalysis = {
   imageUrl?: string;
 };
 
+type ReviewDraft = {
+  category: string;
+  subcategory: string;
+  primaryColor: string;
+  material: string;
+};
+
 type QueueStatus = "queued" | "uploading" | "normalizing" | "saving" | "tagging" | "done" | "failed" | "cancelled";
 type UploadQueueItem = {
   id: string;
@@ -312,6 +319,8 @@ export default function WardrobePage() {
   const [reviewQueue, setReviewQueue] = useState<VisualAnalysis[]>([]);
   const [analyzingItemIds, setAnalyzingItemIds] = useState<string[]>([]);
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
+  const [reviewDrafts, setReviewDrafts] = useState<Record<string, ReviewDraft>>({});
+  const [savingReviewItemIds, setSavingReviewItemIds] = useState<string[]>([]);
 
   useEffect(() => {
     setEnhancedMap(readEnhancedImageMap());
@@ -325,6 +334,18 @@ export default function WardrobePage() {
       const data = await res.json();
       const queue = Array.isArray(data?.queue) ? data.queue : [];
       setReviewQueue(queue);
+      setReviewDrafts((prev) => {
+        const next = { ...prev };
+        for (const entry of queue) {
+          next[entry.itemId] = next[entry.itemId] || {
+            category: entry.category || "",
+            subcategory: entry.subcategory || "",
+            primaryColor: entry.primaryColor || "",
+            material: entry.material || "",
+          };
+        }
+        return next;
+      });
       setAnalysisByItemId((prev) => {
         const next = { ...prev };
         for (const entry of queue) next[entry.itemId] = entry;
@@ -427,20 +448,51 @@ export default function WardrobePage() {
     }
   }, [loadReviewQueue]);
 
-  const handleSaveReview = useCallback(async (itemId: string, updates: Partial<VisualAnalysis>) => {
-    const res = await fetch(`/api/wardrobe/items/${itemId}/analysis`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(updates),
-    });
-    const payload = await res.json().catch(() => null);
-    if (!res.ok) {
-      throw new Error(payload?.error || "Failed to save review");
+  const handleSaveReview = useCallback(async (entry: VisualAnalysis) => {
+    const draft = reviewDrafts[entry.itemId] || {
+      category: entry.category || "",
+      subcategory: entry.subcategory || "",
+      primaryColor: entry.primaryColor || "",
+      material: entry.material || "",
+    };
+
+    setSavingReviewItemIds((prev) => (prev.includes(entry.itemId) ? prev : [...prev, entry.itemId]));
+    try {
+      const res = await fetch(`/api/wardrobe/items/${entry.itemId}/analysis`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          category: draft.category || null,
+          subcategory: draft.subcategory || null,
+          primaryColor: draft.primaryColor || null,
+          material: draft.material || null,
+          secondaryColors: entry.secondaryColors || [],
+          pattern: entry.pattern || null,
+          seasonality: entry.seasonality || [],
+          styleTags: entry.styleTags || [],
+          brandCandidate: entry.brandCandidate || null,
+          sizeEstimateCandidate: entry.sizeEstimateCandidate || null,
+          needsReviewFields: [],
+        }),
+      });
+      const payload = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(payload?.error || "Failed to save review");
+
+      setAnalysisByItemId((prev) => ({ ...prev, [entry.itemId]: payload.analysis }));
+      setReviewDrafts((prev) => {
+        const next = { ...prev };
+        delete next[entry.itemId];
+        return next;
+      });
+      await loadReviewQueue();
+      await loadItems();
+    } catch (error) {
+      console.error(error);
+      setError("Failed to confirm review");
+    } finally {
+      setSavingReviewItemIds((prev) => prev.filter((id) => id !== entry.itemId));
     }
-    setAnalysisByItemId((prev) => ({ ...prev, [itemId]: payload.analysis }));
-    await loadReviewQueue();
-    await loadItems();
-  }, [loadReviewQueue]);
+  }, [loadReviewQueue, reviewDrafts]);
 
   const updateQueueStatus = useCallback((id: string, status: QueueStatus, extra?: Partial<UploadQueueItem>) => {
     setQueue((prev) => prev.map((entry) => (entry.id === id ? { ...entry, status, ...extra } : entry)));
@@ -745,11 +797,14 @@ export default function WardrobePage() {
                 <div key={entry.itemId} className="rounded border bg-white p-3 text-xs">
                   <p className="font-medium mb-2">Item {entry.itemId.slice(0, 8)} • Review: {entry.needsReviewFields?.join(", ") || "none"}</p>
                   <div className="grid grid-cols-2 gap-2">
-                    <input className="border rounded p-1" defaultValue={entry.category || ""} placeholder="Category" onBlur={(e) => { void handleSaveReview(entry.itemId, { ...entry, category: e.target.value || null }); }} />
-                    <input className="border rounded p-1" defaultValue={entry.primaryColor || ""} placeholder="Primary color" onBlur={(e) => { void handleSaveReview(entry.itemId, { ...entry, primaryColor: e.target.value || null }); }} />
-                    <input className="border rounded p-1" defaultValue={entry.subcategory || ""} placeholder="Subcategory" onBlur={(e) => { void handleSaveReview(entry.itemId, { ...entry, subcategory: e.target.value || null }); }} />
-                    <input className="border rounded p-1" defaultValue={entry.material || ""} placeholder="Material" onBlur={(e) => { void handleSaveReview(entry.itemId, { ...entry, material: e.target.value || null }); }} />
+                    <input className="border rounded p-1" value={reviewDrafts[entry.itemId]?.category ?? entry.category ?? ""} placeholder="Category" onChange={(e) => setReviewDrafts((prev) => ({ ...prev, [entry.itemId]: { ...(prev[entry.itemId] || { category: entry.category || "", subcategory: entry.subcategory || "", primaryColor: entry.primaryColor || "", material: entry.material || "" }), category: e.target.value } }))} />
+                    <input className="border rounded p-1" value={reviewDrafts[entry.itemId]?.primaryColor ?? entry.primaryColor ?? ""} placeholder="Primary color" onChange={(e) => setReviewDrafts((prev) => ({ ...prev, [entry.itemId]: { ...(prev[entry.itemId] || { category: entry.category || "", subcategory: entry.subcategory || "", primaryColor: entry.primaryColor || "", material: entry.material || "" }), primaryColor: e.target.value } }))} />
+                    <input className="border rounded p-1" value={reviewDrafts[entry.itemId]?.subcategory ?? entry.subcategory ?? ""} placeholder="Subcategory" onChange={(e) => setReviewDrafts((prev) => ({ ...prev, [entry.itemId]: { ...(prev[entry.itemId] || { category: entry.category || "", subcategory: entry.subcategory || "", primaryColor: entry.primaryColor || "", material: entry.material || "" }), subcategory: e.target.value } }))} />
+                    <input className="border rounded p-1" value={reviewDrafts[entry.itemId]?.material ?? entry.material ?? ""} placeholder="Material" onChange={(e) => setReviewDrafts((prev) => ({ ...prev, [entry.itemId]: { ...(prev[entry.itemId] || { category: entry.category || "", subcategory: entry.subcategory || "", primaryColor: entry.primaryColor || "", material: entry.material || "" }), material: e.target.value } }))} />
                   </div>
+                  <button className="mt-2 rounded bg-slate-900 px-2 py-1 text-white" onClick={() => void handleSaveReview(entry)} disabled={savingReviewItemIds.includes(entry.itemId)}>
+                    {savingReviewItemIds.includes(entry.itemId) ? "Saving…" : "Confirm review"}
+                  </button>
                 </div>
               ))}
             </div>
