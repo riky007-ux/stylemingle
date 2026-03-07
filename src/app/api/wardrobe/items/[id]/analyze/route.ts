@@ -6,7 +6,7 @@ import { cookies } from "next/headers";
 import { AUTH_COOKIE_NAME, verifyToken } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { wardrobe_item_analysis, wardrobe_items } from "@/lib/schema";
-import { isVisualAwarenessEnabled } from "@/lib/visualAwareness";
+import { isVisualAwarenessEnabled, isVisualAwarenessProofModeEnabled } from "@/lib/visualAwareness";
 import { runWardrobeVisionAnalysis } from "@/lib/wardrobeVisionAnalysis";
 
 function getUserId() {
@@ -19,10 +19,14 @@ function disabledResponse() {
   return NextResponse.json({ error: "VISUAL_AWARENESS_DISABLED" }, { status: 404 });
 }
 
-export async function POST(_request: Request, { params }: { params: { id: string } }) {
+export async function POST(request: Request, { params }: { params: { id: string } }) {
   if (!isVisualAwarenessEnabled()) return disabledResponse();
   const userId = getUserId();
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const body = await request.json().catch(() => ({}));
+  const wantsForceNeedsReview = Boolean((body as any)?.forceNeedsReview);
+  const shouldForceNeedsReview = wantsForceNeedsReview && isVisualAwarenessProofModeEnabled();
 
   const [item] = await db
     .select()
@@ -85,25 +89,38 @@ export async function POST(_request: Request, { params }: { params: { id: string
 
   try {
     const { analysis, rawModelPayload } = await runWardrobeVisionAnalysis(item.imageUrl);
-    const status = analysis.needsReviewFields.length > 0 ? "needs_review" : "complete";
+
+    const finalAnalysis = shouldForceNeedsReview
+      ? {
+          ...analysis,
+          overallConfidence: Math.min(analysis.overallConfidence, 0.55),
+          fieldConfidence: {
+            ...analysis.fieldConfidence,
+            brandCandidate: 0.2,
+          },
+          needsReviewFields: [...new Set([...(analysis.needsReviewFields || []), "brandCandidate"])],
+        }
+      : analysis;
+
+    const status = finalAnalysis.needsReviewFields.length > 0 ? "needs_review" : "complete";
 
     const [saved] = await db
       .update(wardrobe_item_analysis)
       .set({
         status,
-        category: analysis.category,
-        subcategory: analysis.subcategory,
-        primaryColor: analysis.primaryColor,
-        secondaryColors: JSON.stringify(analysis.secondaryColors),
-        pattern: analysis.pattern,
-        material: analysis.material,
-        seasonality: JSON.stringify(analysis.seasonality),
-        styleTags: JSON.stringify(analysis.styleTags),
-        brandCandidate: analysis.brandCandidate,
-        sizeEstimateCandidate: analysis.sizeEstimateCandidate,
-        fieldConfidence: JSON.stringify(analysis.fieldConfidence),
-        overallConfidence: Math.round(analysis.overallConfidence * 100),
-        needsReviewFields: JSON.stringify(analysis.needsReviewFields),
+        category: finalAnalysis.category,
+        subcategory: finalAnalysis.subcategory,
+        primaryColor: finalAnalysis.primaryColor,
+        secondaryColors: JSON.stringify(finalAnalysis.secondaryColors),
+        pattern: finalAnalysis.pattern,
+        material: finalAnalysis.material,
+        seasonality: JSON.stringify(finalAnalysis.seasonality),
+        styleTags: JSON.stringify(finalAnalysis.styleTags),
+        brandCandidate: finalAnalysis.brandCandidate,
+        sizeEstimateCandidate: finalAnalysis.sizeEstimateCandidate,
+        fieldConfidence: JSON.stringify(finalAnalysis.fieldConfidence),
+        overallConfidence: Math.round(finalAnalysis.overallConfidence * 100),
+        needsReviewFields: JSON.stringify(finalAnalysis.needsReviewFields),
         rawModelPayload,
         analyzedAt: now,
         updatedAt: now,
@@ -118,13 +135,18 @@ export async function POST(_request: Request, { params }: { params: { id: string
     await db
       .update(wardrobe_items)
       .set({
-        category: analysis.category ?? item.category,
-        primaryColor: analysis.primaryColor ?? item.primaryColor,
-        styleTag: analysis.styleTags[0] ?? item.styleTag,
+        category: finalAnalysis.category ?? item.category,
+        primaryColor: finalAnalysis.primaryColor ?? item.primaryColor,
+        styleTag: finalAnalysis.styleTags[0] ?? item.styleTag,
       })
       .where(and(eq(wardrobe_items.id, item.id), eq(wardrobe_items.userId, userId)));
 
-    return NextResponse.json({ status, analysis: saved });
+    return NextResponse.json({
+      status,
+      analysis: saved,
+      routeUsed: "/api/wardrobe/items/[id]/analyze",
+      proofMode: shouldForceNeedsReview,
+    });
   } catch (error) {
     const code = String((error as any)?.message || "MODEL_FAILURE").includes("INVALID_MODEL_RESPONSE")
       ? "INVALID_MODEL_RESPONSE"

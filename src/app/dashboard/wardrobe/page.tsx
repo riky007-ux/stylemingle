@@ -59,6 +59,7 @@ const BG_REMOVAL_ENABLED = isEnabled(process.env.NEXT_PUBLIC_BG_REMOVAL);
 const AVATAR_V2_ENABLED = isEnabled(process.env.NEXT_PUBLIC_AVATAR_V2);
 const DEBUG_FLAGS_ENABLED = isEnabled(process.env.NEXT_PUBLIC_DEBUG_FLAGS);
 const VISUAL_AWARENESS_ENABLED = isEnabled(process.env.NEXT_PUBLIC_VISUAL_AWARENESS_ENABLED);
+const VISUAL_AWARENESS_PROOF_MODE_ENABLED = isEnabled(process.env.NEXT_PUBLIC_VISUAL_AWARENESS_PROOF_MODE);
 
 const JPEG_QUALITY = 0.9;
 const UPLOAD_CONCURRENCY = 2;
@@ -237,7 +238,7 @@ function WardrobeItemCard({
       </div>
       <div className="absolute left-2 bottom-2 flex gap-1">
         <button type="button" className="rounded bg-white/90 px-2 py-1 text-[11px]" onClick={() => onRetag(item.id)} disabled={isTagging}>
-          Re-tag
+          Legacy re-tag
         </button>
         {onEnhance && (
           <button
@@ -321,6 +322,7 @@ export default function WardrobePage() {
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [reviewDrafts, setReviewDrafts] = useState<Record<string, ReviewDraft>>({});
   const [savingReviewItemIds, setSavingReviewItemIds] = useState<string[]>([]);
+  const [analysisRouteLog, setAnalysisRouteLog] = useState<string>("idle");
 
   useEffect(() => {
     setEnhancedMap(readEnhancedImageMap());
@@ -428,13 +430,20 @@ export default function WardrobePage() {
     }
   };
 
-  const handleAnalyze = useCallback(async (itemId: string) => {
+  const handleAnalyze = useCallback(async (itemId: string, forceNeedsReview = false) => {
     if (!VISUAL_AWARENESS_ENABLED) return;
     setAnalyzingItemIds((prev) => (prev.includes(itemId) ? prev : [...prev, itemId]));
     try {
-      const res = await fetch(`/api/wardrobe/items/${itemId}/analyze`, { method: "POST" });
+      const res = await fetch(`/api/wardrobe/items/${itemId}/analyze`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ forceNeedsReview }),
+      });
       const payload = await res.json().catch(() => null);
       if (!res.ok) throw new Error(payload?.error || "Analyze failed");
+      if (payload?.routeUsed) {
+        setAnalysisRouteLog(`${payload.routeUsed}${payload.proofMode ? " (proof mode)" : ""}`);
+      }
       if (payload?.analysis) {
         setAnalysisByItemId((prev) => ({ ...prev, [itemId]: payload.analysis }));
       }
@@ -782,15 +791,16 @@ export default function WardrobePage() {
       {uploadNotice && <div className="mt-2 text-sm text-zinc-600">{uploadNotice}</div>}
       {bulkTagProgress && bulkTagging && <div className="mt-2 text-sm text-zinc-600">{bulkTagProgress}</div>}
       {error && <div className="mt-2 text-sm text-red-600">{error}</div>}
+      {VISUAL_AWARENESS_ENABLED && <div className="mt-1 text-xs text-zinc-500">Gate 13 Analyze route: {analysisRouteLog}</div>}
 
       {VISUAL_AWARENESS_ENABLED && (
         <div className="mt-6 rounded-xl border p-4 bg-zinc-50">
           <div className="flex items-center justify-between">
-            <h2 className="font-semibold">Needs review ({reviewQueue.length})</h2>
+            <h2 className="font-semibold">Gate 13 Review Queue ({reviewQueue.length})</h2>
             <button className="text-xs rounded border px-2 py-1" onClick={() => void loadReviewQueue()}>Refresh</button>
           </div>
           {reviewQueue.length === 0 ? (
-            <p className="mt-2 text-xs text-zinc-500">No low-confidence fields right now.</p>
+            <p className="mt-2 text-xs text-zinc-500">No low-confidence fields right now. Source: /api/wardrobe/review-queue</p>
           ) : (
             <div className="mt-3 space-y-3">
               {reviewQueue.map((entry) => (
@@ -838,11 +848,22 @@ export default function WardrobePage() {
               />
               {VISUAL_AWARENESS_ENABLED && (
                 <div className="mt-1 rounded border p-2 text-xs bg-white">
-                  <div className="flex items-center justify-between">
-                    <span>Status: {analysis?.status || "not_analyzed"}</span>
-                    <button className="rounded border px-2 py-0.5" onClick={() => void handleAnalyze(item.id)} disabled={analyzingItemIds.includes(item.id)}>
-                      {analyzingItemIds.includes(item.id) ? "Analyzing…" : "Analyze"}
-                    </button>
+                  <div className="flex items-center justify-between gap-1">
+                    <span className="inline-flex rounded px-1.5 py-0.5 bg-zinc-100">Gate 13 status: {(analysis?.status || "not_analyzed").toUpperCase()}</span>
+                    <div className="flex items-center gap-1">
+                      <button className="rounded border px-2 py-0.5" onClick={() => void handleAnalyze(item.id)} disabled={analyzingItemIds.includes(item.id)}>
+                        {analyzingItemIds.includes(item.id) ? "Analyzing…" : "Visual Analyze (Gate 13)"}
+                      </button>
+                      {VISUAL_AWARENESS_PROOF_MODE_ENABLED && (
+                        <button
+                          className="rounded border border-amber-400 px-2 py-0.5 text-amber-700"
+                          onClick={() => void handleAnalyze(item.id, true)}
+                          disabled={analyzingItemIds.includes(item.id)}
+                        >
+                          Force review case (Preview proof)
+                        </button>
+                      )}
+                    </div>
                   </div>
                   <p className="mt-1 capitalize">Detected category: {detectedCategory}</p>
                 </div>

@@ -19,6 +19,11 @@ export function isVisualAwarenessEnabled() {
   return isEnabled(process.env.VISUAL_AWARENESS_ENABLED);
 }
 
+export function isVisualAwarenessProofModeEnabled() {
+  if (!isEnabled(process.env.VISUAL_AWARENESS_PROOF_MODE)) return false;
+  return process.env.VERCEL_ENV !== "production";
+}
+
 export const VISUAL_REVIEW_CONFIDENCE_THRESHOLD = 0.7;
 
 export function parseJsonArray(value: string | null | undefined): string[] {
