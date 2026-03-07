@@ -45,6 +45,38 @@ export const avatar_preferences = sqliteTable("avatar_preferences", {
   updatedAt: integer("updatedAt", { mode: "timestamp" }).notNull(),
 });
 
+export const wardrobe_item_analysis = sqliteTable("wardrobe_item_analysis", {
+  id: text("id").primaryKey(),
+  itemId: text("itemId")
+    .notNull()
+    .references(() => wardrobe_items.id)
+    .unique(),
+  userId: text("userId")
+    .notNull()
+    .references(() => users.id),
+  status: text("status", { enum: ["pending", "complete", "needs_review", "failed"] }).notNull(),
+  category: text("category"),
+  subcategory: text("subcategory"),
+  primaryColor: text("primaryColor"),
+  secondaryColors: text("secondaryColors").notNull().default("[]"),
+  pattern: text("pattern"),
+  material: text("material"),
+  seasonality: text("seasonality").notNull().default("[]"),
+  styleTags: text("styleTags").notNull().default("[]"),
+  brandCandidate: text("brandCandidate"),
+  sizeEstimateCandidate: text("sizeEstimateCandidate"),
+  fieldConfidence: text("fieldConfidence").notNull().default("{}"),
+  overallConfidence: integer("overallConfidence").notNull().default(0),
+  needsReviewFields: text("needsReviewFields").notNull().default("[]"),
+  rawModelPayload: text("rawModelPayload"),
+  failureCode: text("failureCode"),
+  failureMessage: text("failureMessage"),
+  analyzedAt: integer("analyzedAt", { mode: "timestamp" }),
+  reviewedAt: integer("reviewedAt", { mode: "timestamp" }),
+  createdAt: integer("createdAt", { mode: "timestamp" }).notNull(),
+  updatedAt: integer("updatedAt", { mode: "timestamp" }).notNull(),
+});
+
 /**
  * Outfits
  */
@@ -99,4 +131,5 @@ export default {
   outfits,
   ratings,
   user_style_profile,
+  wardrobe_item_analysis,
 };
