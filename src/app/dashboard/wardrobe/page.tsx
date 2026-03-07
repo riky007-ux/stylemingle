@@ -17,6 +17,34 @@ type WardrobeItem = {
   styleTag?: string | null;
 };
 
+
+
+type VisualAnalysis = {
+  itemId: string;
+  status: "pending" | "complete" | "needs_review" | "failed";
+  category?: string | null;
+  subcategory?: string | null;
+  primaryColor?: string | null;
+  secondaryColors?: string[];
+  pattern?: string | null;
+  material?: string | null;
+  seasonality?: string[];
+  styleTags?: string[];
+  brandCandidate?: string | null;
+  sizeEstimateCandidate?: string | null;
+  needsReviewFields?: string[];
+  overallConfidence?: number;
+  fieldConfidence?: Record<string, number>;
+  imageUrl?: string;
+};
+
+type ReviewDraft = {
+  category: string;
+  subcategory: string;
+  primaryColor: string;
+  material: string;
+};
+
 type QueueStatus = "queued" | "uploading" | "normalizing" | "saving" | "tagging" | "done" | "failed" | "cancelled";
 type UploadQueueItem = {
   id: string;
@@ -30,6 +58,8 @@ type UploadQueueItem = {
 const BG_REMOVAL_ENABLED = isEnabled(process.env.NEXT_PUBLIC_BG_REMOVAL);
 const AVATAR_V2_ENABLED = isEnabled(process.env.NEXT_PUBLIC_AVATAR_V2);
 const DEBUG_FLAGS_ENABLED = isEnabled(process.env.NEXT_PUBLIC_DEBUG_FLAGS);
+const VISUAL_AWARENESS_ENABLED = isEnabled(process.env.NEXT_PUBLIC_VISUAL_AWARENESS_ENABLED);
+const VISUAL_AWARENESS_PROOF_MODE_ENABLED = isEnabled(process.env.NEXT_PUBLIC_VISUAL_AWARENESS_PROOF_MODE);
 
 const JPEG_QUALITY = 0.9;
 const UPLOAD_CONCURRENCY = 2;
@@ -208,7 +238,7 @@ function WardrobeItemCard({
       </div>
       <div className="absolute left-2 bottom-2 flex gap-1">
         <button type="button" className="rounded bg-white/90 px-2 py-1 text-[11px]" onClick={() => onRetag(item.id)} disabled={isTagging}>
-          Re-tag
+          Legacy re-tag
         </button>
         {onEnhance && (
           <button
@@ -286,9 +316,46 @@ export default function WardrobePage() {
   const [enhancePhoto, setEnhancePhoto] = useState(BG_REMOVAL_ENABLED);
   const [enhancedMap, setEnhancedMap] = useState<Record<string, string>>({});
   const [queryDebugEnabled, setQueryDebugEnabled] = useState(false);
+  const [analysisByItemId, setAnalysisByItemId] = useState<Record<string, VisualAnalysis>>({});
+  const [reviewQueue, setReviewQueue] = useState<VisualAnalysis[]>([]);
+  const [analyzingItemIds, setAnalyzingItemIds] = useState<string[]>([]);
+  const [categoryFilter, setCategoryFilter] = useState<string>("all");
+  const [reviewDrafts, setReviewDrafts] = useState<Record<string, ReviewDraft>>({});
+  const [savingReviewItemIds, setSavingReviewItemIds] = useState<string[]>([]);
+  const [analysisRouteLog, setAnalysisRouteLog] = useState<string>("idle");
 
   useEffect(() => {
     setEnhancedMap(readEnhancedImageMap());
+  }, []);
+
+  const loadReviewQueue = useCallback(async () => {
+    if (!VISUAL_AWARENESS_ENABLED) return;
+    try {
+      const res = await fetch("/api/wardrobe/review-queue");
+      if (!res.ok) return;
+      const data = await res.json();
+      const queue = Array.isArray(data?.queue) ? data.queue : [];
+      setReviewQueue(queue);
+      setReviewDrafts((prev) => {
+        const next = { ...prev };
+        for (const entry of queue) {
+          next[entry.itemId] = next[entry.itemId] || {
+            category: entry.category || "",
+            subcategory: entry.subcategory || "",
+            primaryColor: entry.primaryColor || "",
+            material: entry.material || "",
+          };
+        }
+        return next;
+      });
+      setAnalysisByItemId((prev) => {
+        const next = { ...prev };
+        for (const entry of queue) next[entry.itemId] = entry;
+        return next;
+      });
+    } catch (err) {
+      console.error(err);
+    }
   }, []);
 
   async function loadItems() {
@@ -297,6 +364,24 @@ export default function WardrobePage() {
       const data = await res.json();
       if (!res.ok) throw new Error("Failed to load wardrobe");
       setItems(data);
+
+      if (VISUAL_AWARENESS_ENABLED) {
+        const details = await Promise.all(
+          data.map(async (item: WardrobeItem) => {
+            const detailRes = await fetch(`/api/wardrobe/items/${item.id}/analysis`);
+            if (!detailRes.ok) return null;
+            const payload = await detailRes.json();
+            return payload?.analysis || null;
+          })
+        );
+        setAnalysisByItemId(
+          details.filter(Boolean).reduce((acc: Record<string, VisualAnalysis>, entry: VisualAnalysis) => {
+            acc[entry.itemId] = entry;
+            return acc;
+          }, {})
+        );
+        await loadReviewQueue();
+      }
     } catch (err) {
       console.error(err);
       setError("Failed to load wardrobe");
@@ -344,6 +429,79 @@ export default function WardrobePage() {
       setItems((prev) => prev.map((item) => (item.id === id ? { ...item, ...updated } : item)));
     }
   };
+
+  const handleAnalyze = useCallback(async (itemId: string, forceNeedsReview = false) => {
+    if (!VISUAL_AWARENESS_ENABLED) return;
+    setAnalyzingItemIds((prev) => (prev.includes(itemId) ? prev : [...prev, itemId]));
+    try {
+      const res = await fetch(`/api/wardrobe/items/${itemId}/analyze`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ forceNeedsReview }),
+      });
+      const payload = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(payload?.error || "Analyze failed");
+      if (payload?.routeUsed) {
+        setAnalysisRouteLog(`${payload.routeUsed}${payload.proofMode ? " (proof mode)" : ""}`);
+      }
+      if (payload?.analysis) {
+        setAnalysisByItemId((prev) => ({ ...prev, [itemId]: payload.analysis }));
+      }
+      await loadReviewQueue();
+      await loadItems();
+    } catch (err) {
+      console.error(err);
+      setError(`Analyze failed for item ${itemId}`);
+    } finally {
+      setAnalyzingItemIds((prev) => prev.filter((id) => id !== itemId));
+    }
+  }, [loadReviewQueue]);
+
+  const handleSaveReview = useCallback(async (entry: VisualAnalysis) => {
+    const draft = reviewDrafts[entry.itemId] || {
+      category: entry.category || "",
+      subcategory: entry.subcategory || "",
+      primaryColor: entry.primaryColor || "",
+      material: entry.material || "",
+    };
+
+    setSavingReviewItemIds((prev) => (prev.includes(entry.itemId) ? prev : [...prev, entry.itemId]));
+    try {
+      const res = await fetch(`/api/wardrobe/items/${entry.itemId}/analysis`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          category: draft.category || null,
+          subcategory: draft.subcategory || null,
+          primaryColor: draft.primaryColor || null,
+          material: draft.material || null,
+          secondaryColors: entry.secondaryColors || [],
+          pattern: entry.pattern || null,
+          seasonality: entry.seasonality || [],
+          styleTags: entry.styleTags || [],
+          brandCandidate: entry.brandCandidate || null,
+          sizeEstimateCandidate: entry.sizeEstimateCandidate || null,
+          needsReviewFields: [],
+        }),
+      });
+      const payload = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(payload?.error || "Failed to save review");
+
+      setAnalysisByItemId((prev) => ({ ...prev, [entry.itemId]: payload.analysis }));
+      setReviewDrafts((prev) => {
+        const next = { ...prev };
+        delete next[entry.itemId];
+        return next;
+      });
+      await loadReviewQueue();
+      await loadItems();
+    } catch (error) {
+      console.error(error);
+      setError("Failed to confirm review");
+    } finally {
+      setSavingReviewItemIds((prev) => prev.filter((id) => id !== entry.itemId));
+    }
+  }, [loadReviewQueue, reviewDrafts]);
 
   const updateQueueStatus = useCallback((id: string, status: QueueStatus, extra?: Partial<UploadQueueItem>) => {
     setQueue((prev) => prev.map((entry) => (entry.id === id ? { ...entry, status, ...extra } : entry)));
@@ -528,6 +686,14 @@ export default function WardrobePage() {
     }));
   };
 
+  const filteredItems = useMemo(() => {
+    return items.filter((item) => {
+      if (categoryFilter === "all") return true;
+      const detectedCategory = analysisByItemId[item.id]?.category || item.category || "unknown";
+      return detectedCategory === categoryFilter;
+    });
+  }, [analysisByItemId, categoryFilter, items]);
+
   return (
     <div className="p-6 max-w-5xl mx-auto">
       <h1 className="text-2xl font-semibold mb-4">Wardrobe</h1>
@@ -571,6 +737,19 @@ export default function WardrobePage() {
         <button type="button" onClick={handleAutoTagCloset} disabled={bulkTagging || items.length === 0} className="rounded border border-zinc-300 px-3 py-1 text-sm disabled:opacity-50">
           {bulkTagging ? (bulkTagProgress || "Auto-tagging…") : "Auto-tag my closet"}
         </button>
+
+        {VISUAL_AWARENESS_ENABLED && (
+          <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} className="rounded border border-zinc-300 px-2 py-1 text-sm bg-white">
+            <option value="all">All categories</option>
+            <option value="top">Top</option>
+            <option value="bottom">Bottom</option>
+            <option value="shoes">Shoes</option>
+            <option value="outerwear">Outerwear</option>
+            <option value="accessory">Accessory</option>
+            <option value="other">Other</option>
+            <option value="unknown">Unknown</option>
+          </select>
+        )}
       </div>
 
       <div className="mt-4 rounded-xl border p-3 bg-zinc-50" data-testid="upload-queue-panel">
@@ -612,29 +791,86 @@ export default function WardrobePage() {
       {uploadNotice && <div className="mt-2 text-sm text-zinc-600">{uploadNotice}</div>}
       {bulkTagProgress && bulkTagging && <div className="mt-2 text-sm text-zinc-600">{bulkTagProgress}</div>}
       {error && <div className="mt-2 text-sm text-red-600">{error}</div>}
+      {VISUAL_AWARENESS_ENABLED && <div className="mt-1 text-xs text-zinc-500">Gate 13 Analyze route: {analysisRouteLog}</div>}
+
+      {VISUAL_AWARENESS_ENABLED && (
+        <div className="mt-6 rounded-xl border p-4 bg-zinc-50">
+          <div className="flex items-center justify-between">
+            <h2 className="font-semibold">Gate 13 Review Queue ({reviewQueue.length})</h2>
+            <button className="text-xs rounded border px-2 py-1" onClick={() => void loadReviewQueue()}>Refresh</button>
+          </div>
+          {reviewQueue.length === 0 ? (
+            <p className="mt-2 text-xs text-zinc-500">No low-confidence fields right now. Source: /api/wardrobe/review-queue</p>
+          ) : (
+            <div className="mt-3 space-y-3">
+              {reviewQueue.map((entry) => (
+                <div key={entry.itemId} className="rounded border bg-white p-3 text-xs">
+                  <p className="font-medium mb-2">Item {entry.itemId.slice(0, 8)} • Review: {entry.needsReviewFields?.join(", ") || "none"}</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <input className="border rounded p-1" value={reviewDrafts[entry.itemId]?.category ?? entry.category ?? ""} placeholder="Category" onChange={(e) => setReviewDrafts((prev) => ({ ...prev, [entry.itemId]: { ...(prev[entry.itemId] || { category: entry.category || "", subcategory: entry.subcategory || "", primaryColor: entry.primaryColor || "", material: entry.material || "" }), category: e.target.value } }))} />
+                    <input className="border rounded p-1" value={reviewDrafts[entry.itemId]?.primaryColor ?? entry.primaryColor ?? ""} placeholder="Primary color" onChange={(e) => setReviewDrafts((prev) => ({ ...prev, [entry.itemId]: { ...(prev[entry.itemId] || { category: entry.category || "", subcategory: entry.subcategory || "", primaryColor: entry.primaryColor || "", material: entry.material || "" }), primaryColor: e.target.value } }))} />
+                    <input className="border rounded p-1" value={reviewDrafts[entry.itemId]?.subcategory ?? entry.subcategory ?? ""} placeholder="Subcategory" onChange={(e) => setReviewDrafts((prev) => ({ ...prev, [entry.itemId]: { ...(prev[entry.itemId] || { category: entry.category || "", subcategory: entry.subcategory || "", primaryColor: entry.primaryColor || "", material: entry.material || "" }), subcategory: e.target.value } }))} />
+                    <input className="border rounded p-1" value={reviewDrafts[entry.itemId]?.material ?? entry.material ?? ""} placeholder="Material" onChange={(e) => setReviewDrafts((prev) => ({ ...prev, [entry.itemId]: { ...(prev[entry.itemId] || { category: entry.category || "", subcategory: entry.subcategory || "", primaryColor: entry.primaryColor || "", material: entry.material || "" }), material: e.target.value } }))} />
+                  </div>
+                  <button className="mt-2 rounded bg-slate-900 px-2 py-1 text-white" onClick={() => void handleSaveReview(entry)} disabled={savingReviewItemIds.includes(entry.itemId)}>
+                    {savingReviewItemIds.includes(entry.itemId) ? "Saving…" : "Confirm review"}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-        {items.map((item) => (
-          <WardrobeItemCard
-            key={item.id}
-            item={item}
-            displayImageUrl={enhancedMap[item.id] || item.imageUrl}
-            onDelete={async (id) => {
-              setItems((prev) => prev.filter((it) => it.id !== id));
-              const res = await fetch(`/api/wardrobe/items?id=${encodeURIComponent(id)}`, { method: "DELETE", credentials: "same-origin" });
-              if (!res.ok) {
-                setError("Delete failed");
-                await loadItems();
-              }
-            }}
-            onSaveDetails={handleSaveDetails}
-            onRetag={async (id) => {
-              await runAutoTag(id, true);
-            }}
-            onEnhance={BG_REMOVAL_ENABLED ? enhanceExistingItem : undefined}
-            isTagging={taggingItemIds.includes(item.id)}
-          />
-        ))}
+        {filteredItems.map((item) => {
+          const analysis = analysisByItemId[item.id];
+          const detectedCategory = analysis?.category || item.category || "unknown";
+          return (
+            <div key={item.id}>
+              <WardrobeItemCard
+                item={item}
+                displayImageUrl={enhancedMap[item.id] || item.imageUrl}
+                onDelete={async (id) => {
+                  setItems((prev) => prev.filter((it) => it.id !== id));
+                  const res = await fetch(`/api/wardrobe/items?id=${encodeURIComponent(id)}`, { method: "DELETE", credentials: "same-origin" });
+                  if (!res.ok) {
+                    setError("Delete failed");
+                    await loadItems();
+                  }
+                }}
+                onSaveDetails={handleSaveDetails}
+                onRetag={async (id) => {
+                  await runAutoTag(id, true);
+                }}
+                onEnhance={BG_REMOVAL_ENABLED ? enhanceExistingItem : undefined}
+                isTagging={taggingItemIds.includes(item.id)}
+              />
+              {VISUAL_AWARENESS_ENABLED && (
+                <div className="mt-1 rounded border p-2 text-xs bg-white">
+                  <div className="flex items-center justify-between gap-1">
+                    <span className="inline-flex rounded px-1.5 py-0.5 bg-zinc-100">Gate 13 status: {(analysis?.status || "not_analyzed").toUpperCase()}</span>
+                    <div className="flex items-center gap-1">
+                      <button className="rounded border px-2 py-0.5" onClick={() => void handleAnalyze(item.id)} disabled={analyzingItemIds.includes(item.id)}>
+                        {analyzingItemIds.includes(item.id) ? "Analyzing…" : "Visual Analyze (Gate 13)"}
+                      </button>
+                      {VISUAL_AWARENESS_PROOF_MODE_ENABLED && (
+                        <button
+                          className="rounded border border-amber-400 px-2 py-0.5 text-amber-700"
+                          onClick={() => void handleAnalyze(item.id, true)}
+                          disabled={analyzingItemIds.includes(item.id)}
+                        >
+                          Force review case (Preview proof)
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  <p className="mt-1 capitalize">Detected category: {detectedCategory}</p>
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );

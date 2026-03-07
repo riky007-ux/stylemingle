@@ -36,6 +36,13 @@
       "when": 1768206000000,
       "tag": "0004_gate_12_2_add_is_premium",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1772844349855,
+      "tag": "0005_gate_13_visual_awareness_foundation",
+      "breakpoints": true
     }
   ]
 }

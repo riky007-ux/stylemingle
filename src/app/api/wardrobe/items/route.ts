@@ -5,7 +5,7 @@ import { randomUUID } from 'crypto';
 
 import { AUTH_COOKIE_NAME, verifyToken } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { wardrobe_items } from '@/lib/schema';
+import { wardrobe_item_analysis, wardrobe_items } from '@/lib/schema';
 
 function isSchemaMismatchError(error: unknown) {
   const msg = String((error as any)?.message || error || '').toLowerCase();
@@ -184,6 +184,15 @@ export async function DELETE(request: Request) {
   if (!id) {
     return NextResponse.json({ error: 'Missing id' }, { status: 400 });
   }
+
+  await db
+    .delete(wardrobe_item_analysis)
+    .where(
+      and(
+        eq(wardrobe_item_analysis.itemId, id),
+        eq(wardrobe_item_analysis.userId, userId)
+      )
+    );
 
   await db
     .delete(wardrobe_items)
