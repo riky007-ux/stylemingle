@@ -17,6 +17,20 @@ function isSchemaMismatchError(error: unknown) {
   return msg.includes("no such column") || msg.includes("has no column named") || msg.includes("no such table") || msg.includes("sqlite_error");
 }
 
+
+async function deleteAnalysisRowIfPresent(itemId: string, userId: string) {
+  try {
+    await db.$client.execute({
+      sql: "DELETE FROM wardrobe_item_analysis WHERE wardrobeItemId = ? AND userId = ?",
+      args: [itemId, userId],
+    });
+  } catch (error) {
+    if (!String((error as any)?.message || '').toLowerCase().includes('no such table')) {
+      throw error;
+    }
+  }
+}
+
 export async function PATCH(request: Request, { params }: { params: { id: string } }) {
   const userId = getUserId();
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -77,6 +91,7 @@ export async function DELETE(_request: Request, { params }: { params: { id: stri
       return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
 
+    await deleteAnalysisRowIfPresent(itemId, userId);
     await db.delete(wardrobe_items).where(and(eq(wardrobe_items.id, itemId), eq(wardrobe_items.userId, userId)));
 
     return new NextResponse(null, { status: 204 });

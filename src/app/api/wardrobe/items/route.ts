@@ -24,6 +24,20 @@ function migrationRequiredResponse() {
   );
 }
 
+
+async function deleteAnalysisRowIfPresent(itemId: string, userId: string) {
+  try {
+    await db.$client.execute({
+      sql: 'DELETE FROM wardrobe_item_analysis WHERE wardrobeItemId = ? AND userId = ?',
+      args: [itemId, userId],
+    });
+  } catch (error) {
+    if (!String((error as any)?.message || '').toLowerCase().includes('no such table')) {
+      throw error;
+    }
+  }
+}
+
 async function selectLegacyRows(userId: string) {
   try {
     // Older schema had category/color/style columns.
@@ -184,6 +198,8 @@ export async function DELETE(request: Request) {
   if (!id) {
     return NextResponse.json({ error: 'Missing id' }, { status: 400 });
   }
+
+  await deleteAnalysisRowIfPresent(id, userId);
 
   await db
     .delete(wardrobe_items)

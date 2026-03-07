@@ -15,9 +15,17 @@ type WardrobeItem = {
   category?: "top" | "bottom" | "shoes" | "outerwear" | "accessory" | "other" | "unknown" | null;
   primaryColor?: string | null;
   styleTag?: string | null;
+  analysis?: AnalysisSummary;
 };
 
 type QueueStatus = "queued" | "uploading" | "normalizing" | "saving" | "tagging" | "done" | "failed" | "cancelled";
+type AnalysisSummary = {
+  status?: "complete" | "needs_review" | "not_analyzed";
+  routeUsed?: string | null;
+  proofMode?: boolean;
+  needsReviewFields?: string[];
+};
+
 type UploadQueueItem = {
   id: string;
   file: File;
@@ -30,6 +38,8 @@ type UploadQueueItem = {
 const BG_REMOVAL_ENABLED = isEnabled(process.env.NEXT_PUBLIC_BG_REMOVAL);
 const AVATAR_V2_ENABLED = isEnabled(process.env.NEXT_PUBLIC_AVATAR_V2);
 const DEBUG_FLAGS_ENABLED = isEnabled(process.env.NEXT_PUBLIC_DEBUG_FLAGS);
+const GATE13_VISUAL_ANALYZE_ENABLED = isEnabled(process.env.NEXT_PUBLIC_GATE13_VISUAL_ANALYZE);
+const GATE13_PROOF_FORCE_REVIEW_ENABLED = isEnabled(process.env.NEXT_PUBLIC_GATE13_PROOF_FORCE_REVIEW);
 
 const JPEG_QUALITY = 0.9;
 const UPLOAD_CONCURRENCY = 2;
@@ -159,6 +169,7 @@ function WardrobeItemCard({
   onDelete,
   onSaveDetails,
   onRetag,
+  onGate13Analyze,
   onEnhance,
   isTagging,
 }: {
@@ -167,6 +178,7 @@ function WardrobeItemCard({
   onDelete: (id: string) => Promise<void>;
   onSaveDetails: (id: string, updates: Partial<WardrobeItem>) => Promise<void>;
   onRetag: (id: string) => Promise<void>;
+  onGate13Analyze?: (id: string) => Promise<void>;
   onEnhance?: (item: WardrobeItem) => Promise<void>;
   isTagging: boolean;
 }) {
@@ -201,6 +213,11 @@ function WardrobeItemCard({
         {item.category ? "Edit" : "Add details"}
       </button>
       {isTagging && <div className="absolute left-2 top-10 rounded bg-black/70 px-2 py-1 text-[11px] text-white">Analyzing…</div>}
+      {item.analysis && (
+        <div className="absolute left-2 top-[68px] rounded bg-indigo-700/90 px-2 py-1 text-[11px] text-white">
+          Gate 13: {item.analysis.status || "unknown"}
+        </div>
+      )}
       <div className="absolute right-2 bottom-10 rounded bg-white/85 px-2 py-1 text-[11px]">
         <div className="capitalize">{item.category || "unknown"}</div>
         <div className="capitalize">{item.primaryColor || "unknown"}</div>
@@ -208,8 +225,13 @@ function WardrobeItemCard({
       </div>
       <div className="absolute left-2 bottom-2 flex gap-1">
         <button type="button" className="rounded bg-white/90 px-2 py-1 text-[11px]" onClick={() => onRetag(item.id)} disabled={isTagging}>
-          Re-tag
+          Legacy re-tag
         </button>
+        {onGate13Analyze && (
+          <button type="button" className="rounded bg-indigo-100 px-2 py-1 text-[11px]" onClick={() => onGate13Analyze(item.id)} disabled={isTagging}>
+            Visual Analyze (Gate 13)
+          </button>
+        )}
         {onEnhance && (
           <button
             type="button"
@@ -286,6 +308,8 @@ export default function WardrobePage() {
   const [enhancePhoto, setEnhancePhoto] = useState(BG_REMOVAL_ENABLED);
   const [enhancedMap, setEnhancedMap] = useState<Record<string, string>>({});
   const [queryDebugEnabled, setQueryDebugEnabled] = useState(false);
+  const [reviewQueue, setReviewQueue] = useState<Array<{ wardrobeItemId: string; imageUrl: string; needsReviewFields: string[] }>>([]);
+  const [loadingQueue, setLoadingQueue] = useState(false);
 
   useEffect(() => {
     setEnhancedMap(readEnhancedImageMap());
@@ -306,6 +330,7 @@ export default function WardrobePage() {
   useEffect(() => {
     void loadItems();
   }, []);
+
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -332,6 +357,69 @@ export default function WardrobePage() {
       setTaggingItemIds((prev) => prev.filter((id) => id !== itemId));
     }
   }, []);
+
+
+  const runGate13Analyze = useCallback(async (itemId: string) => {
+    const res = await fetch("/api/ai/wardrobe/analyze", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        itemId,
+        forceNeedsReview: GATE13_PROOF_FORCE_REVIEW_ENABLED,
+      }),
+    });
+    const payload = await res.json().catch(() => null);
+    if (!res.ok) throw new Error(payload?.error || "Gate 13 analyze failed");
+
+    setItems((prev) =>
+      prev.map((item) =>
+        item.id === itemId
+          ? {
+              ...item,
+              category: payload.category ?? item.category,
+              primaryColor: payload.primaryColor ?? item.primaryColor,
+              styleTag: payload.styleTag ?? item.styleTag,
+              analysis: {
+                status: payload.analysisStatus,
+                routeUsed: payload.routeUsed,
+                proofMode: payload.proofMode,
+                needsReviewFields: payload.needsReviewFields || [],
+              },
+            }
+          : item
+      )
+    );
+  }, []);
+
+  const loadReviewQueue = useCallback(async () => {
+    if (!GATE13_VISUAL_ANALYZE_ENABLED) return;
+    setLoadingQueue(true);
+    try {
+      const res = await fetch("/api/ai/wardrobe/review-queue");
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Failed");
+      setReviewQueue(data.queue || []);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoadingQueue(false);
+    }
+  }, []);
+
+  const confirmReview = useCallback(async (wardrobeItemId: string) => {
+    const res = await fetch("/api/ai/wardrobe/review-confirm", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ wardrobeItemId, needsReviewFields: [] }),
+    });
+    if (!res.ok) throw new Error("Confirm failed");
+    setReviewQueue((prev) => prev.filter((q) => q.wardrobeItemId !== wardrobeItemId));
+    setItems((prev) => prev.map((item) => item.id === wardrobeItemId ? { ...item, analysis: { ...(item.analysis || {}), status: "complete", needsReviewFields: [] } } : item));
+  }, []);
+
+  useEffect(() => {
+    void loadReviewQueue();
+  }, [loadReviewQueue]);
 
   const handleSaveDetails = async (id: string, updates: Partial<WardrobeItem>) => {
     const res = await fetch(`/api/wardrobe/items/${id}`, {
@@ -613,6 +701,30 @@ export default function WardrobePage() {
       {bulkTagProgress && bulkTagging && <div className="mt-2 text-sm text-zinc-600">{bulkTagProgress}</div>}
       {error && <div className="mt-2 text-sm text-red-600">{error}</div>}
 
+
+      {GATE13_VISUAL_ANALYZE_ENABLED && (
+        <div className="mt-6 rounded-xl border p-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold">Gate 13 Review Queue</h2>
+            <button type="button" className="text-xs rounded border px-2 py-1" onClick={() => void loadReviewQueue()}>Refresh</button>
+          </div>
+          {loadingQueue ? (
+            <p className="mt-2 text-xs text-zinc-500">Loading queue…</p>
+          ) : reviewQueue.length === 0 ? (
+            <p className="mt-2 text-xs text-zinc-500">No items need review.</p>
+          ) : (
+            <ul className="mt-2 space-y-2">
+              {reviewQueue.map((entry) => (
+                <li key={entry.wardrobeItemId} className="flex items-center justify-between gap-3 rounded border p-2 text-xs">
+                  <span>{entry.wardrobeItemId} · needs: {(entry.needsReviewFields || []).join(", ") || "none"}</span>
+                  <button type="button" className="rounded border px-2 py-1" onClick={() => void confirmReview(entry.wardrobeItemId)}>Confirm</button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
       <div className="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
         {items.map((item) => (
           <WardrobeItemCard
@@ -631,6 +743,7 @@ export default function WardrobePage() {
             onRetag={async (id) => {
               await runAutoTag(id, true);
             }}
+            onGate13Analyze={GATE13_VISUAL_ANALYZE_ENABLED ? runGate13Analyze : undefined}
             onEnhance={BG_REMOVAL_ENABLED ? enhanceExistingItem : undefined}
             isTagging={taggingItemIds.includes(item.id)}
           />

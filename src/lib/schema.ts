@@ -45,6 +45,25 @@ export const avatar_preferences = sqliteTable("avatar_preferences", {
   updatedAt: integer("updatedAt", { mode: "timestamp" }).notNull(),
 });
 
+export const wardrobe_item_analysis = sqliteTable("wardrobe_item_analysis", {
+  id: text("id").primaryKey(),
+  wardrobeItemId: text("wardrobeItemId")
+    .notNull()
+    .references(() => wardrobe_items.id),
+  userId: text("userId")
+    .notNull()
+    .references(() => users.id),
+  status: text("status", { enum: ["complete", "needs_review"] }).notNull().default("complete"),
+  routeUsed: text("routeUsed").notNull().default("legacy"),
+  proofMode: integer("proofMode", { mode: "boolean" }).notNull().default(false),
+  needsReviewFields: text("needsReviewFields").notNull().default("[]"),
+  category: text("category"),
+  primaryColor: text("primaryColor"),
+  styleTag: text("styleTag"),
+  updatedAt: integer("updatedAt", { mode: "timestamp" }).notNull(),
+  createdAt: integer("createdAt", { mode: "timestamp" }).notNull(),
+});
+
 /**
  * Outfits
  */
@@ -99,4 +118,5 @@ export default {
   outfits,
   ratings,
   user_style_profile,
+  wardrobe_item_analysis,
 };
